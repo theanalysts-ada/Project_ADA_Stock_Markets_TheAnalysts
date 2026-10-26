@@ -303,14 +303,15 @@ def gap_tests_by_period(df: pd.DataFrame) -> pd.DataFrame:
         df: Table with date, r_night and r_day.
 
     Returns:
-        One row per (sample, return type).
+        One row per (sample, return type), with period labels from the input dates.
+        The 2008 split is included when both sides are present.
     """
     df = df.dropna(subset=["r_night", "r_day"])
-    samples = {
-        "1998–2020": df,
-        "1998–2007": df[df["date"].dt.year <= 2007],
-        "2008–2020": df[df["date"].dt.year >= 2008],
-    }
+    first_year, last_year = df["date"].dt.year.min(), df["date"].dt.year.max()
+    samples = {f"{first_year}–{last_year}": df}
+    if first_year < 2008 <= last_year:
+        samples[f"{first_year}–2007"] = df[df["date"].dt.year <= 2007]
+        samples[f"2008–{last_year}"] = df[df["date"].dt.year >= 2008]
     rows = []
     for sample, subset in samples.items():
         for log, kind in ((False, "simple"), (True, "log")):
