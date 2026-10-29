@@ -5,3 +5,5 @@ DATA_DIR = ROOT_DIR / "data"
 META_FILE = "symbols_valid_meta.csv"
 PRICES_FILE = "prices.parquet"
 DROPPED_FILE = "dropped_rows.parquet"
+
+STUDY_START_YEAR = 1998

@@ -2,6 +2,11 @@ import numpy as np
 import pandas as pd
 
 
+# Annualisation convention: approximately 252 US trading sessions per year.
+# Source: https://www.cmegroup.com/education/files/Volatility_Update_0710.pdf
+TRADING_DAYS_PER_YEAR = 252
+
+
 def add_adjusted_prices(df: pd.DataFrame) -> pd.DataFrame:
     """Add split- and dividend-adjusted open, high, low and close prices.
 
@@ -57,9 +62,6 @@ def add_returns(df: pd.DataFrame) -> pd.DataFrame:
     df["r_night"] = (df["open_adj"] / prev["close_adj"] - 1).where(consecutive)
     df["r_day"] = df["close_adj"] / df["open_adj"] - 1
     return df
-
-
-TRADING_DAYS_PER_YEAR = 252
 
 
 def lagged_mean_dollar_volume(df: pd.DataFrame, window: int = 20) -> pd.Series:
