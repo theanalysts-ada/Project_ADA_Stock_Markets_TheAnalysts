@@ -222,3 +222,25 @@ def size_report(data_dir: Path = DATA_DIR, n_sample: int = 500, seed: int = 0) -
     report["Parquet"] = [len(prices), prices.memory_usage(deep=True).sum() / 1e9, parquet_time, parquet_disk / 1e9]
     metrics = ["rows", "memory (GB)", "loading time (s)", "disk size (GB)"]
     return pd.DataFrame.from_dict(report, orient="index", columns=metrics).round(2)
+
+
+def missing_sessions_by_ticker(prices: pd.DataFrame, calendar: pd.DataFrame) -> pd.DataFrame:
+    """Internal missing sessions between each ticker's first/last observation.
+
+    Use the unfiltered price table restricted to the study period: liquidity-screen
+    exclusions are sample choices, not missing source data. No pre-IPO/post-exit
+    dates are counted. Gaps are not automatically provider errors or suspensions.
+    """
+    sessions = pd.DatetimeIndex(calendar["date"].drop_duplicates().sort_values())
+    if prices.duplicated(["ticker", "date"]).any():
+        raise ValueError("Duplicate ticker/date observations")
+    records = []
+    for ticker, frame in prices.groupby("ticker", observed=True):
+        observed = pd.DatetimeIndex(frame["date"].unique()).sort_values()
+        expected = sessions[(sessions >= observed.min()) & (sessions <= observed.max())]
+        missing = expected.difference(observed)
+        records.append({"ticker": ticker, "first_date": observed.min(), "last_date": observed.max(),
+                        "expected_sessions": len(expected), "missing_sessions": len(missing),
+                        "missing_share": len(missing) / len(expected) if len(expected) else np.nan,
+                        "non_session_dates": len(observed.difference(sessions))})
+    return pd.DataFrame(records).sort_values("missing_sessions", ascending=False).reset_index(drop=True)
