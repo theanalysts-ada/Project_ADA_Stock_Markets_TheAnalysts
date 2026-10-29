@@ -296,6 +296,25 @@ def block_bootstrap_ci(diff: pd.Series, block: int = 21, n: int = 1000, seed: in
     }]).round(2)
 
 
+def label_sample(table: pd.DataFrame, portfolio: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Add the portfolio name and the first and last date of the paired returns.
+
+    Args:
+        table: One-row result, as returned by night_indicator_regression or block_bootstrap_ci.
+        portfolio: Name shown in the table.
+        df: Table with date, r_night and r_day. Dates are taken from rows where both returns exist.
+
+    Returns:
+        A copy of table with portfolio, first date and last date as the first columns.
+    """
+    pair = df.dropna(subset=["r_night", "r_day"])
+    out = table.copy()
+    out.insert(0, "portfolio", portfolio)
+    out.insert(1, "first date", pair["date"].min().date())
+    out.insert(2, "last date", pair["date"].max().date())
+    return out
+
+
 def gap_tests_by_period(df: pd.DataFrame) -> pd.DataFrame:
     """Night-indicator regression on simple and log returns, full sample and around 2008.
 
