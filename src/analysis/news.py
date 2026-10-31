@@ -56,7 +56,11 @@ def assign_sessions(filings: pd.DataFrame, windows: pd.DataFrame) -> pd.DataFram
     j = np.searchsorted(closes, out["accepted"].to_numpy(), side="right")
     j_unknown = np.searchsorted(windows["date"].to_numpy(), out["filing_date"].to_numpy(), side="left")
     j = np.where(known, j, j_unknown)
-    inside = (j < len(windows)) & (out["filing_date"] >= windows["date"].iloc[0] - pd.Timedelta(days=7)).to_numpy()
+    # Keep filings after the close that opens the first night of the calendar.
+    first_close = windows["previous_close"].iloc[0]
+    after_start = np.where(known, out["accepted"] > first_close,
+                           out["filing_date"] > first_close.tz_convert("America/New_York").tz_localize(None).normalize())
+    inside = (j < len(windows)) & after_start
     out, j, known = out[inside].copy(), j[inside], known[inside]
     out["i"] = j
     out["date"] = windows["date"].to_numpy()[j]

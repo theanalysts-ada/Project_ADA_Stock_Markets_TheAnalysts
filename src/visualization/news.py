@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from src.visualization.plots import BUY_HOLD, DAY, NIGHT
@@ -63,4 +64,25 @@ def plot_gap_tests(tests: pd.DataFrame) -> plt.Figure:
     ax.set(yticks=list(y), yticklabels=tests.index, xlabel="Night − day gap, annualised (%), 95 % CI clustered by date",
            title="Does the gap survive without news?")
     ax.grid(axis="y", visible=False)
+    return fig
+
+
+def plot_macro_paths(paths: dict[str, pd.DataFrame]) -> plt.Figure:
+    """Figure N4: $1 invested overnight on all nights or skipping 8:30 release nights, and intraday.
+
+    Args:
+        paths: Panel title -> table returned by macro_paths.
+
+    Returns:
+        The figure.
+    """
+    fig, axes = plt.subplots(1, len(paths), sharey=True, figsize=(5.5 * len(paths), 4.5))
+    for ax, (name, p) in zip(np.atleast_1d(axes), paths.items()):
+        ax.plot(p["date"], p["night"], color=NIGHT, label="Overnight, all nights")
+        ax.plot(p["date"], p["night without releases"], color=NIGHT, ls="--", label="Overnight, cash on jobs / CPI nights")
+        ax.plot(p["date"], p["day"], color=DAY, label="Intraday")
+        ax.set(yscale="log", title=name, xlabel="Date")
+    np.atleast_1d(axes)[0].set_ylabel("Value of $1 (log scale)")
+    handles, labels = np.atleast_1d(axes)[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.04), fontsize=10)
     return fig
