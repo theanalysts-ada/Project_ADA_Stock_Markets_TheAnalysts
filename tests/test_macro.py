@@ -6,8 +6,8 @@ from src.analysis.news import session_windows
 from src.data.macro import parse_fomc_headers
 
 
-def _event(name, date, clock):
-    return {"event": name, "date": pd.Timestamp(date), "release": pd.Timestamp(f"{date} {clock}", tz="America/New_York")}
+def make_event(name, date, time):
+    return {"event": name, "date": pd.Timestamp(date), "release": pd.Timestamp(f"{date} {time}", tz="America/New_York")}
 
 
 def test_parse_fomc_headers():
@@ -21,10 +21,10 @@ def test_parse_fomc_headers():
 def test_releases_are_placed_in_the_right_half():
     windows = session_windows("2015-03-25", "2015-04-15")
     events = pd.DataFrame([
-        _event("jobs report", "2015-04-03", "08:30"),  # Good Friday: market closed
-        _event("CPI", "2015-04-14", "08:30"),
-        _event("FOMC", "2015-03-18", "14:00"),  # outside the calendar: dropped
-        _event("FOMC", "2015-04-14", "14:00"),
+        make_event("jobs report", "2015-04-03", "08:30"),  # Good Friday: market closed
+        make_event("CPI", "2015-04-14", "08:30"),
+        make_event("FOMC", "2015-03-18", "14:00"),  # outside the calendar: dropped
+        make_event("FOMC", "2015-04-14", "14:00"),
     ])
     placed = place_events(events, windows)
     got = placed.assign(date=placed["date"].dt.strftime("%m-%d"))[["event", "date", "timing"]].values.tolist()

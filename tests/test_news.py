@@ -7,22 +7,30 @@ from src.data.edgar import name_similarity, normalise_name
 from src.features.calendar import build_night_calendar
 
 
-def _filings(times, filing_dates=None, known=None, earnings=None, form="8-K", cik=1):
+def make_filings(times, filing_dates=None, known=None, earnings=None, form="8-K"):
+    """Small table of filings with the columns of load_filings."""
     accepted = pd.to_datetime(pd.Series(times), utc=True)
-    n = len(accepted)
+    accepted_ny = accepted.dt.tz_convert("America/New_York")
+    if filing_dates is None:
+        filing_dates = accepted_ny.dt.date
+    n = len(times)
     return pd.DataFrame({
-        "cik": cik, "accession": [f"a{i}" for i in range(n)], "form": form,
-        "filing_date": pd.to_datetime(filing_dates or accepted.dt.tz_convert("America/New_York").dt.date),
-        "accepted": accepted, "accepted_ny": accepted.dt.tz_convert("America/New_York"),
+        "cik": 1,
+        "accession": [f"a{i}" for i in range(n)],
+        "form": form,
+        "filing_date": pd.to_datetime(filing_dates),
+        "accepted": accepted,
+        "accepted_ny": accepted_ny,
         "time_known": known if known is not None else [True] * n,
-        "items": "", "earnings": earnings if earnings is not None else [False] * n,
+        "items": "",
+        "earnings": earnings if earnings is not None else [False] * n,
     })
 
 
 def test_night_and_day_around_holiday_and_early_close():
     windows = session_windows("2019-07-01", "2019-07-09")
     # 3 July 2019 closes at 13:00 New York (17:00 UTC); 4 July is a holiday.
-    filings = _filings([
+    filings = make_filings([
         "2019-07-03T16:59:00Z",  # 12:59 New York, before the early close: day of 3 July
         "2019-07-03T17:01:00Z",  # after the early close: night of 5 July
         "2019-07-04T15:00:00Z",  # holiday: night of 5 July
@@ -37,7 +45,7 @@ def test_night_and_day_around_holiday_and_early_close():
 
 def test_unknown_time_goes_to_filing_date_session():
     windows = session_windows("2019-07-01", "2019-07-09")
-    filings = _filings(["2019-07-06T04:00:00Z"], filing_dates=["2019-07-06"], known=[False])
+    filings = make_filings(["2019-07-06T04:00:00Z"], filing_dates=["2019-07-06"], known=[False])
     out = assign_sessions(filings, windows)
     assert out.loc[0, "timing"] == "unknown"
     assert out.loc[0, "date"] == pd.Timestamp("2019-07-08")
@@ -48,7 +56,7 @@ def test_panel_flags_and_quiet_window():
     dates = windows.loc[windows["date"].between("2019-07-01", "2019-07-31"), "date"]
     stocks = pd.DataFrame({"ticker": "A", "date": dates, "r_night": 0.0, "r_day": 0.0})
     identity = pd.DataFrame({"ticker": ["A"], "cik": [1], "first_filing": ["1996-01-01"], "status": ["verified"]})
-    filings = _filings(["2019-07-15T20:30:00Z"], earnings=[True])  # Monday 16:30: night of Tuesday 16 July
+    filings = make_filings(["2019-07-15T20:30:00Z"], earnings=[True])  # Monday 16:30: night of Tuesday 16 July
     panel = build_news_panel(stocks, identity, assign_sessions(filings, windows), windows, start_year=2019)
     row = panel.set_index("date")
     assert row.loc["2019-07-16", "news_night"] and row.loc["2019-07-16", "earnings_night"]
@@ -62,7 +70,7 @@ def test_amendment_is_not_news_but_breaks_quiet():
     dates = windows.loc[windows["date"].between("2019-07-01", "2019-07-31"), "date"]
     stocks = pd.DataFrame({"ticker": "A", "date": dates, "r_night": 0.0, "r_day": 0.0})
     identity = pd.DataFrame({"ticker": ["A"], "cik": [1], "first_filing": ["1996-01-01"], "status": ["verified"]})
-    filings = _filings(["2019-07-15T20:30:00Z"], form="8-K/A")
+    filings = make_filings(["2019-07-15T20:30:00Z"], form="8-K/A")
     panel = build_news_panel(stocks, identity, assign_sessions(filings, windows), windows, start_year=2019)
     assert not panel["news_night"].any()
     assert (~panel["quiet"]).sum() == 5
