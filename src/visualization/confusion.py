@@ -1,7 +1,8 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
-from src.visualization.plots import BUY_HOLD, DAY, STOCK
+from src.visualization.plots import BUY_HOLD, DAY, NIGHT, STOCK
 
 
 def plot_pairs_by_length(counts: pd.Series) -> plt.Figure:
@@ -22,34 +23,30 @@ def plot_pairs_by_length(counts: pd.Series) -> plt.Figure:
     return fig
 
 
-def plot_pair_abnormal_volume(case: pd.DataFrame, buzz: str, receiver: str) -> plt.Figure:
-    """Abnormal volume of the well-known company (top) and of the ticker that may be bought by mistake (bottom).
-
-    The spike days of the well-known company are marked in both panels.
+def plot_overnight_event_study(result: pd.DataFrame, usual: float | None = None, title: str | None = None) -> plt.Figure:
+    """Mean overnight return of a ticker around the spikes of another one.
 
     Args:
-        case: Table returned by load_pair.
-        buzz: Ticker of the well-known company.
-        receiver: Ticker that may be bought by mistake.
+        result: Table returned by event_study (the rows of the overnight return are used).
+        usual: Usual overnight return of the ticker, drawn as a dashed line (a return: 0.01 is 1 %).
+        title: Optional title.
 
     Returns:
         The figure.
     """
-    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(11, 6))
-    top = case[case["ticker"] == buzz].set_index("date")
-    bottom = case[case["ticker"] == receiver].set_index("date")["abn_volume"].where(lambda s: s > 0)
-    spikes = top.loc[top["spike"], "abn_volume"]
-    axes[0].plot(top.index, top["abn_volume"].where(top["abn_volume"] > 0), color=STOCK, lw=0.6)
-    axes[0].scatter(spikes.index, spikes, color=DAY, s=14, zorder=3, label="attention spike")
-    axes[1].plot(bottom.index, bottom, color=BUY_HOLD, lw=0.6)
-    for when in spikes.index:
-        axes[1].axvline(when, color=DAY, alpha=0.35, lw=0.8)
-    for ax, ticker in zip(axes, (buzz, receiver)):
-        ax.axhline(1, color="black", lw=0.8, ls="--")
-        ax.set(yscale="log", ylabel=f"{ticker}: abnormal volume")
-    axes[0].legend(loc="upper left")
-    axes[1].set_xlabel("Date")
-    fig.suptitle(f"Abnormal volume of {buzz} and {receiver}")
+    night = result[result["return"] == "r_night"]
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.errorbar(night["day"], night["mean"] * 100, yerr=night["ci95"] * 100, marker="o", capsize=3, color=NIGHT)
+    if usual is not None:
+        ax.axhline(usual * 100, color=DAY, ls="--", lw=1.5, label=f"usual overnight return ({usual * 100:.2f} %)")
+        ax.legend()
+    ax.axhline(0, color="grey", linewidth=0.8)
+    ax.axvline(0, color="grey", linestyle="--", linewidth=0.8)
+    ax.set(xlabel="Trading days relative to the spike (day 0)", ylabel="Mean overnight return (%)",
+           xticks=night["day"])
+    if title:
+        ax.set_title(title)
+    fig.tight_layout()
     return fig
 
 
@@ -88,53 +85,26 @@ def plot_pair_density(case: pd.DataFrame, buzz: str, receiver: str) -> plt.Figur
     return fig
 
 
-def plot_pair_episode(
-    case: pd.DataFrame, buzz: str, receiver: str, start: str, end: str, events: dict[str, str],
-) -> plt.Figure:
-    """Daily trading volume of the two tickers over a short period, with dated events marked.
+def plot_placebo_scores(placebo_scores: np.ndarray, score: float, p: float, title: str | None = None) -> plt.Figure:
+    """Scores obtained with each placebo company, and the observed score.
 
     Args:
-        case: Table returned by load_pair.
-        buzz: Ticker of the well-known company (volume in millions of shares).
-        receiver: Ticker that may be bought by mistake (volume in thousands of shares).
-        start: First day shown.
-        end: Last day shown.
-        events: Date (YYYY-MM-DD) -> short description of a documented event, drawn as a vertical line.
+        placebo_scores: Score obtained with each placebo company (a return: 0.01 is one percentage point).
+        score: Observed score.
+        p: One-sided p-value of the observed score.
+        title: Optional title.
 
     Returns:
         The figure.
     """
-    window = case[(case["date"] >= start) & (case["date"] <= end)]
-    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(11, 5.5))
-    for ax, ticker, color, scale, unit in zip(axes, (buzz, receiver), (STOCK, BUY_HOLD), (1e6, 1e3), ("millions", "thousands")):
-        rows = window[window["ticker"] == ticker]
-        ax.bar(rows["date"], rows["volume"].astype("float64") / scale, color=color, width=0.8)
-        ax.set_ylabel(f"{ticker}: shares traded\n({unit})")
-    for height, (when, label) in zip((0.92, 0.74, 0.56), events.items()):
-        for ax in axes:
-            ax.axvline(pd.Timestamp(when), color=DAY, ls="--", lw=1.2)
-        axes[0].text(pd.Timestamp(when), height, f" {label}", transform=axes[0].get_xaxis_transform(),
-                     ha="left", va="top", fontsize=10, color=DAY)
-    axes[1].set_xlabel("Date")
-    fig.suptitle(f"Trading volume of {buzz} and {receiver} around a documented episode")
-    return fig
-
-
-def plot_pvalues(table: pd.DataFrame) -> plt.Figure:
-    """Histogram of the placebo p-values of the pairs.
-
-    Without any effect the p-values are spread evenly between 0 and 1; a real effect piles them up near 0.
-
-    Args:
-        table: First table returned by pooled_placebo_test.
-
-    Returns:
-        The figure.
-    """
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.hist(table["p"], bins=10, range=(0, 1), color=BUY_HOLD, edgecolor="white")
-    ax.axhline(len(table) / 10, color=DAY, ls="--", lw=1.5, label="expected without any effect")
-    ax.set(xlabel="Placebo p-value of a pair", ylabel="Number of pairs",
-           title=f"p-values of the {len(table)} tested pairs")
+    scores = np.asarray(placebo_scores, dtype="float64")
+    scores = scores[~np.isnan(scores)] * 100
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    ax.hist(scores, bins=20, color=BUY_HOLD, edgecolor="white", label="placebo companies")
+    ax.axvline(score * 100, color=DAY, lw=2.5, label=f"observed score: {score * 100:.2f} points (p = {p:.2f})")
+    ax.set(xlabel="Score: excess overnight return (percentage points)", ylabel="Number of placebo companies")
+    if title:
+        ax.set_title(title)
     ax.legend()
+    fig.tight_layout()
     return fig

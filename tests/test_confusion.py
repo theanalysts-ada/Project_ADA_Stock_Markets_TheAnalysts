@@ -3,23 +3,21 @@ import pandas as pd
 
 from src.analysis import confusion
 from src.analysis.confusion import (
-    benjamini_hochberg,
     case_summary,
-    check_tickers,
     closest_in_size,
-    describe_pairs,
     is_secondary_security,
     load_pair,
     name_words,
     night_score,
     one_letter_pairs,
+    pair_placebo_test,
     pair_summary,
     pairs_by_min_length,
     placebo_pvalue,
-    pooled_placebo_test,
     ticker_coverage,
     ticker_name_matches,
     twin_events,
+    usual_overnight_return,
 )
 from src.analysis.crowd import event_study
 
@@ -35,14 +33,6 @@ def make_prices() -> pd.DataFrame:
     df["date"] = pd.to_datetime(df["date"])
     df["ticker"] = df["ticker"].astype("category")
     return df
-
-
-def make_meta() -> pd.DataFrame:
-    return pd.DataFrame({
-        "ticker": ["AA", "AAL", "ZZ"],
-        "security_name": ["Alpha", "Alpha Air", "Zed"],
-        "is_etf": [False, False, True],
-    })
 
 
 def test_pairs_cover_substitution_insertion_and_deletion():
@@ -70,22 +60,6 @@ def test_coverage_gives_first_last_and_count():
     assert coverage.loc["AA", "n_days"] == 3
     assert coverage.loc["AAL", "first_date"] == pd.Timestamp("2020-01-02")
     assert coverage.loc["AAL", "last_date"] == pd.Timestamp("2020-01-06")
-
-
-def test_overlap_of_a_pair():
-    pairs = one_letter_pairs(["AA", "AAL"])
-    table = describe_pairs(pairs, make_meta(), ticker_coverage(make_prices()))
-    row = table.iloc[0]
-    assert row["overlap_start"] == pd.Timestamp("2020-01-02")
-    assert row["overlap_end"] == pd.Timestamp("2020-01-03")
-    assert row["overlap_days"] == 1
-    assert row["security_name_b"] == "Alpha Air"
-
-
-def test_no_overlap_gives_zero_days():
-    pairs = pd.DataFrame({"ticker_a": ["AAL"], "ticker_b": ["ZZ"], "edit": ["substitution"]})
-    table = describe_pairs(pairs, make_meta(), ticker_coverage(make_prices()))
-    assert table["overlap_days"].iloc[0] == 0
 
 
 def test_summary_counts_pairs_and_tickers():
@@ -268,22 +242,11 @@ def test_pairs_by_min_length_counts_the_shorter_ticker():
     assert counts.to_dict() == {2: 1, 3: 1, 4: 1}
 
 
-def test_check_tickers_flags_missing_ones():
-    meta = pd.DataFrame({"ticker": ["AA", "NOPRICE"], "security_name": ["Alpha", "No prices"], "is_etf": [False, False]})
-    coverage = ticker_coverage(make_prices())
-    table = check_tickers(["AA", "MISSING", "NOPRICE"], meta, coverage)
-    assert table.loc["AA", "in_prices"]
-    assert not table.loc["MISSING", "in_prices"] and not table.loc["MISSING", "in_metadata"]
-    assert table.loc["NOPRICE", "in_metadata"] and not table.loc["NOPRICE", "in_prices"]
-    assert pd.isna(table.loc["MISSING", "first_date"])
-
-
-def make_returns(night_after: float = 0.04, day_after: float = -0.02) -> pd.DataFrame:
-    """Ten sessions of one ticker; the session after day 5 has a night return and a day return as given."""
+def make_returns(night_after: float = 0.04) -> pd.DataFrame:
+    """Ten sessions of one ticker; the session after day 5 has the given overnight return."""
     night = np.zeros(10)
-    day = np.zeros(10)
-    night[6], day[6] = night_after, day_after
-    return pd.DataFrame({"r_night": night, "r_day": day, "bad": False})
+    night[6] = night_after
+    return pd.DataFrame({"r_night": night, "bad": False})
 
 
 def test_night_score_is_the_excess_night_after_an_event():
@@ -305,12 +268,6 @@ def test_a_flagged_row_cannot_be_an_event():
 def test_placebo_pvalue_counts_the_placebo_scores_at_least_as_large():
     assert placebo_pvalue(0.25, np.array([0.1, 0.2, 0.3, np.nan])) == 0.5
     assert placebo_pvalue(1.0, np.zeros(9)) == 0.1
-
-
-def test_benjamini_hochberg_on_a_textbook_example():
-    result = benjamini_hochberg(pd.Series([0.01, 0.04, 0.03, 0.005]), q=0.03)
-    assert np.allclose(result["q_value"], [0.02, 0.04, 0.04, 0.02])
-    assert result["rejected"].tolist() == [True, False, False, True]
 
 
 def test_closest_in_size_uses_a_log_scale():
@@ -351,7 +308,7 @@ def make_synthetic_prices(seed: int = 0) -> pd.DataFrame:
     return prices
 
 
-def test_pooled_placebo_test_finds_a_planted_overnight_gain(monkeypatch):
+def test_pair_placebo_test_finds_a_planted_overnight_gain(monkeypatch):
     prices = make_synthetic_prices()
 
     def fake_load_prices(tickers=None, columns=None):
@@ -359,14 +316,24 @@ def test_pooled_placebo_test_finds_a_planted_overnight_gain(monkeypatch):
         return (rows[columns] if columns else rows).copy()
 
     monkeypatch.setattr(confusion, "load_prices", fake_load_prices)
-    matches = pd.DataFrame({"ticker": ["RECV"], "owner": ["BUZZ"]})
-    table, summary = pooled_placebo_test(
-        matches, flags=[], n_pool=6, n_candidates=4, n_draws=30, min_events=3, min_pool_dollar=1e3,
-        min_pool_days=100,
-    )
-    assert table.columns.tolist() == ["receiver", "buzz", "n_events", "score", "placebo_mean", "p", "q_value", "rejected"]
-    assert len(table) == 1 and table.loc[0, "n_events"] >= 10
-    assert table.loc[0, "score"] > 4  # in percentage points
-    assert table.loc[0, "p"] <= 0.1
-    assert summary["pairs tested"] == 1
+    options = {"flags": [], "n_placebos": 4, "min_pool_dollar": 1e3, "min_pool_days": 100}
+    result = pair_placebo_test("RECV", "BUZZ", **options)
+    assert result["n_events"] >= 10
+    assert result["score"] > 0.04  # a planted gain of 5 percentage points
+    assert result["p"] <= 0.25  # the 4 placebo companies are the only ones to beat: 1 / (1 + 4)
+    assert len(result["placebo_scores"]) == 4  # one score per placebo company, no draw
+    assert "RECV" not in result["placebos"].index and "BUZZ" not in result["placebos"].index
 
+    later = pair_placebo_test("RECV", "BUZZ", start_year=2019, **options)
+    assert 3 <= later["n_events"] < result["n_events"]  # the events of 2018 are ignored
+
+
+def test_usual_overnight_return_ignores_flagged_rows_and_early_years():
+    case = pd.DataFrame({
+        "ticker": ["X"] * 4 + ["Y"],
+        "date": pd.to_datetime(["1995-01-02", "2000-01-03", "2000-01-04", "2000-01-05", "2000-01-03"]),
+        "r_night": [0.50, 0.01, 0.03, 0.90, 0.20],
+        **{flag: [False] * 5 for flag in confusion.PAIR_FLAGS},
+    })
+    case.loc[3, "open_missing"] = True  # a flagged session is ignored
+    assert np.isclose(usual_overnight_return(case, "X"), 0.02)  # only 2000-01-03 and 2000-01-04 count

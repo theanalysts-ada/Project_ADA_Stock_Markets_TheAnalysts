@@ -5,6 +5,7 @@ import pandas as pd
 from rapidfuzz import process
 from rapidfuzz.distance import Levenshtein
 
+from src.config import STUDY_START_YEAR
 from src.data.load import load_prices
 from src.data.quality import FILTERS, flag_suspicious
 from src.features.returns import add_dollar_volume, add_returns
@@ -18,8 +19,9 @@ IGNORED_WORDS = {
     "with", "new", "the", "and", "for", "from",
 }
 # Flags removed from the returns of a pair. The liquidity filter of Part V would remove the small stocks studied
-# here, so we use the light filter of Part I plus the stale-open flags, as Part V does.
-PAIR_FLAGS = FILTERS["light"] + ["open_equals_prev_close", "open_equals_close"]
+# here, so we use the light filter of Part I plus the flag of a stale open (the open is the previous close, which
+# makes the overnight return wrong).
+PAIR_FLAGS = FILTERS["light"] + ["open_equals_prev_close"]
 # A ticker that traded every market day, used to build the calendar of the returns of a few tickers.
 CALENDAR_TICKER = "SPY"
 # Words that reveal a secondary security of a company (its preferred shares, notes, units...), not its main stock.
@@ -67,30 +69,6 @@ def one_letter_pairs(tickers: list[str]) -> pd.DataFrame:
         "ticker_b": np.array(names, dtype=object)[cols],
         "edit": np.where(lengths[rows] == lengths[cols], "substitution", "insertion/deletion"),
     })
-
-
-def describe_pairs(pairs: pd.DataFrame, meta: pd.DataFrame, coverage: pd.DataFrame) -> pd.DataFrame:
-    """Add names, asset types and the common trading period to each pair.
-
-    Args:
-        pairs: Table returned by one_letter_pairs.
-        meta: Table returned by load_metadata, with ticker, security_name and is_etf.
-        coverage: Table returned by ticker_coverage.
-
-    Returns:
-        The pairs with, for each side (suffix _a and _b), the security name, the is_etf flag, the first and
-        last date and the number of days, then overlap_start, overlap_end and overlap_days
-        (calendar days; 0 when the two tickers were never listed at the same time).
-    """
-    info = meta.set_index("ticker")[["security_name", "is_etf"]].join(coverage, how="inner")
-    table = pairs
-    for side in ("a", "b"):
-        side_info = info.add_suffix(f"_{side}").rename_axis(f"ticker_{side}").reset_index()
-        table = table.merge(side_info, on=f"ticker_{side}", how="left")
-    table["overlap_start"] = table[["first_date_a", "first_date_b"]].max(axis=1)
-    table["overlap_end"] = table[["last_date_a", "last_date_b"]].min(axis=1)
-    table["overlap_days"] = (table["overlap_end"] - table["overlap_start"]).dt.days.clip(lower=0)
-    return table
 
 
 def pair_summary(pairs: pd.DataFrame, n_tickers: int) -> pd.Series:
@@ -296,24 +274,23 @@ def pairs_by_min_length(pairs: pd.DataFrame) -> pd.Series:
     return lengths.value_counts().sort_index().rename("pairs").rename_axis("letters in the shorter ticker")
 
 
-def check_tickers(tickers: list[str], meta: pd.DataFrame, coverage: pd.DataFrame) -> pd.DataFrame:
-    """Check whether some tickers are in the dataset, and over which period.
+def usual_overnight_return(
+    case: pd.DataFrame, ticker: str, flags: list[str] = PAIR_FLAGS, start_year: int = STUDY_START_YEAR,
+) -> float:
+    """Usual overnight return of a ticker: its mean over all its sessions, cleaned as in event_study.
 
     Args:
-        tickers: Tickers to look for.
-        meta: Table returned by load_metadata.
-        coverage: Table returned by ticker_coverage.
+        case: Table returned by load_pair.
+        ticker: Ticker whose overnight return is averaged.
+        flags: Quality flags; the returns of a flagged row are ignored.
+        start_year: Sessions before this year are ignored.
 
     Returns:
-        One row per requested ticker: in_prices, in_metadata, security_name, first_date, last_date and n_days.
-        Dates and counts are missing for a ticker with no price data.
+        The mean overnight return (a return: 0.01 is one percentage point).
     """
-    table = pd.DataFrame(index=pd.Index(tickers, name="ticker"))
-    names = meta.drop_duplicates("ticker").set_index("ticker")["security_name"]
-    table["in_prices"] = table.index.isin(coverage.index)
-    table["in_metadata"] = table.index.isin(names.index)
-    table["security_name"] = names.reindex(table.index)
-    return table.join(coverage)
+    rows = case[(case["ticker"] == ticker) & (case["date"].dt.year >= start_year)]
+    keep = ~rows[flags].any(axis=1) if flags else pd.Series(True, index=rows.index)
+    return float(rows["r_night"].where(keep).astype("float64").mean())
 
 
 def _spikes_on(spikes: pd.DataFrame, ticker: str, dates: pd.Series) -> pd.Series:
@@ -344,11 +321,11 @@ def night_score(rows: pd.DataFrame, spike: pd.Series, flags: list[str] | None = 
 
 
 def placebo_pvalue(score: float, placebo_scores: np.ndarray) -> float:
-    """One-sided empirical p-value of a score against the scores of placebo draws.
+    """One-sided empirical p-value of a score against the scores obtained with placebo companies.
 
     Args:
         score: Observed score.
-        placebo_scores: Scores obtained with random placebos (missing values are ignored).
+        placebo_scores: Score obtained with each placebo company (missing values are ignored).
 
     Returns:
         (1 + number of placebo scores at least as large as the observed one) / (1 + number of placebo scores).
@@ -356,30 +333,6 @@ def placebo_pvalue(score: float, placebo_scores: np.ndarray) -> float:
     scores = np.asarray(placebo_scores, dtype="float64")
     scores = scores[~np.isnan(scores)]
     return float((1 + (scores >= score).sum()) / (1 + len(scores)))
-
-
-def benjamini_hochberg(p_values: pd.Series, q: float = 0.10) -> pd.DataFrame:
-    """Benjamini-Hochberg correction of a family of p-values.
-
-    The p-values are sorted, p(1) <= ... <= p(m); the adjusted value of p(i) is the smallest p(j) * m / j with
-    j >= i (capped at 1). Rejecting every hypothesis whose adjusted value is at most q controls the expected
-    share of false discoveries among the rejections at q.
-
-    Args:
-        p_values: One p-value per test, with a unique index.
-        q: Level at which the false discovery rate is controlled.
-
-    Returns:
-        A table in the order of p_values: p, q_value (adjusted p-value) and rejected.
-    """
-    p = p_values.astype("float64")
-    ordered = p.sort_values()
-    m = len(ordered)
-    adjusted = ordered.to_numpy() * m / np.arange(1, m + 1)
-    adjusted = np.minimum.accumulate(adjusted[::-1])[::-1].clip(max=1.0)
-    table = pd.DataFrame({"p": ordered.to_numpy(), "q_value": adjusted}, index=ordered.index)
-    table["rejected"] = table["q_value"] <= q
-    return table.reindex(p.index)
 
 
 def closest_in_size(size: float, pool_sizes: pd.Series, n: int) -> list[str]:
@@ -397,51 +350,43 @@ def closest_in_size(size: float, pool_sizes: pd.Series, n: int) -> list[str]:
     return distance.nsmallest(n).index.tolist()
 
 
-def pooled_placebo_test(
-    matches: pd.DataFrame,
+def pair_placebo_test(
+    receiver: str,
+    buzz: str,
     flags: list[str] = PAIR_FLAGS,
-    n_pool: int = 500,
-    n_candidates: int = 100,
-    n_draws: int = 300,
-    min_events: int = 15,
+    n_placebos: int = 100,
     min_pool_dollar: float = 1e7,
     min_pool_days: int = 2000,
-    seed: int = 0,
-) -> tuple[pd.DataFrame, pd.Series]:
-    """Test the overnight gain of every receiver after the spikes of its well-known company, against placebos.
+    start_year: int = STUDY_START_YEAR,
+) -> dict:
+    """Test the overnight gain of a receiver after the spikes of its well-known company, against placebos.
 
-    For each pair, the score of night_score is computed with the spikes of the well-known company, then with
-    the spikes of placebo companies: stocks of the pool that do not look like the receiver, drawn among the
-    n_candidates whose size (median dollar volume) is the closest to that of the well-known company. A pair is
-    kept when its receiver is traded enough to be measured and has at least min_events events. The p-values are
-    corrected with benjamini_hochberg.
+    The score of night_score is computed with the spikes of the well-known company, then with the spikes of each
+    placebo company: the n_placebos liquid stocks whose size (median dollar volume) is the closest to that of the
+    well-known company, the receiver and the well-known company excepted.
 
     Args:
-        matches: Table returned by ticker_name_matches (ticker is the receiver, owner the well-known company).
-        flags: Quality flags blanked in the returns of the receivers.
-        n_pool: Number of stocks sampled to form the pool of placebo companies.
-        n_candidates: Number of pool stocks, closest in size, from which the placebos of a pair are drawn.
-        n_draws: Number of placebo draws per pair.
-        min_events: Minimum number of events of a pair.
-        min_pool_dollar: Minimum median dollar volume of a pool stock.
-        min_pool_days: Minimum number of trading days of a pool stock.
-        seed: Random seed.
+        receiver: Ticker that may be bought by mistake.
+        buzz: Ticker of the well-known company.
+        flags: Quality flags blanked in the returns of the receiver.
+        n_placebos: Number of placebo companies.
+        min_pool_dollar: Minimum median dollar volume of a placebo company.
+        min_pool_days: Minimum number of trading days of a placebo company.
+        start_year: Events and returns before this year are ignored, as in event_study (Part V).
 
     Returns:
-        One row per tested pair (receiver, buzz, n_events, score, placebo_mean, p, q_value, rejected, in %), and a
-        summary of the test over all pairs: mean score, mean and standard deviation of the placebo mean score, and the
-        p-value of the mean score.
+        A dict with the score and the number of events of the well-known company, the score obtained with each
+        placebo company (placebo_scores, in the order of their closeness in size), the one-sided p-value (p) and the
+        size of each placebo company (placebos).
     """
-    rng = np.random.default_rng(seed)
-    receivers = sorted(set(matches["ticker"]))
-    owners = sorted(set(matches["owner"]))
-
-    prices = load_prices(tickers=receivers + [CALENDAR_TICKER])
+    prices = load_prices(tickers=[receiver, CALENDAR_TICKER])
     prices["ticker"] = prices["ticker"].astype(str)
     prices = flag_suspicious(add_dollar_volume(add_returns(prices)))
-    rows = {t: g.sort_values("date").reset_index(drop=True) for t, g in prices.groupby("ticker") if t in receivers}
+    prices = prices[(prices["ticker"] == receiver) & (prices["date"].dt.year >= start_year)]
+    rows = prices.sort_values("date").reset_index(drop=True)
 
     volume = load_prices(columns=["ticker", "date", "close", "volume", "asset_type"])
+    volume = volume[volume["date"].dt.year >= start_year]
     volume["dollar"] = volume["close"].astype("float64") * volume["volume"].astype("float64")
     by_ticker = volume.groupby("ticker", observed=True)
     sizes = by_ticker["dollar"].median()
@@ -449,38 +394,16 @@ def pooled_placebo_test(
     days = by_ticker["dollar"].size().set_axis(sizes.index)
     is_stock = by_ticker["asset_type"].first().set_axis(sizes.index).eq("stock")
     eligible = sizes[(sizes >= min_pool_dollar) & (days >= min_pool_days) & is_stock]
-    pool_sizes = eligible.sample(min(n_pool, len(eligible)), random_state=seed)
-    wanted = set(pool_sizes.index) | set(owners)
+    if buzz not in sizes.index:
+        raise ValueError(f"{buzz} has no volume data.")
+    placebos = closest_in_size(sizes[buzz], eligible.drop([receiver, buzz], errors="ignore"), n_placebos)
+    wanted = set(placebos) | {buzz}
     spikes = abnormal_volume(volume[volume["ticker"].isin(wanted)].assign(ticker=lambda d: d["ticker"].astype(str)))
     spikes = spikes.pivot(index="date", columns="ticker", values="spike")
 
-    results, placebo = [], {}
-    for pair in matches.itertuples():
-        r = rows.get(pair.ticker)
-        if r is None or pair.owner not in spikes.columns:
-            continue
-        measured = (r["volume"] == 0).mean() <= 0.10 and (r["close"].astype("float64") * r["volume"]).median() >= 2e4
-        score, n_events = night_score(r, _spikes_on(spikes, pair.owner, r["date"]), flags)
-        if not measured or n_events < min_events:
-            continue
-        excluded = set(matches.loc[matches["ticker"] == pair.ticker, "owner"]) | {pair.ticker}
-        candidates = closest_in_size(sizes[pair.owner], pool_sizes.drop(excluded, errors="ignore"), n_candidates)
-        cache = {}
-        scores = []
-        for candidate in rng.choice(candidates, size=n_draws):
-            if candidate not in cache:
-                cache[candidate] = night_score(r, _spikes_on(spikes, candidate, r["date"]), flags)[0]
-            scores.append(cache[candidate])
-        placebo[(pair.ticker, pair.owner)] = np.array(scores)
-        results.append({"receiver": pair.ticker, "buzz": pair.owner, "n_events": n_events, "score": score,
-                        "placebo_mean": np.nanmean(scores), "p": placebo_pvalue(score, np.array(scores))})
-    table = pd.DataFrame(results)
-    table = table.join(benjamini_hochberg(table["p"])[["q_value", "rejected"]])
-    null = np.nanmean(np.array(list(placebo.values())), axis=0)
-    summary = pd.Series({
-        "pairs tested": len(table), "mean score": table["score"].mean(),
-        "placebo mean": null.mean(), "placebo sd": null.std(),
-        "p-value": placebo_pvalue(table["score"].mean(), null),
-    })
-    table[["score", "placebo_mean"]] *= 100
-    return table, summary
+    score, n_events = night_score(rows, _spikes_on(spikes, buzz, rows["date"]), flags)
+    placebo_scores = np.array([night_score(rows, _spikes_on(spikes, t, rows["date"]), flags)[0] for t in placebos])
+    return {
+        "score": score, "n_events": n_events, "placebo_scores": placebo_scores,
+        "p": placebo_pvalue(score, placebo_scores), "placebos": sizes.reindex(placebos),
+    }
