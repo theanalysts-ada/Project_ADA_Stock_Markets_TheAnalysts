@@ -91,14 +91,14 @@ def test_shared_bootstrap_preserves_means_and_paired_contrasts(monkeypatch):
     })
     expected_summary = night_type_summary(data, block=10, n=200)
     expected_contrasts = night_type_contrasts(data, block=10, n=200)
-    bootstrap = risk_module._night_type_bootstrap
+    bootstrap = risk_module._bootstrap_nights
     calls = []
 
     def counted_bootstrap(*args, **kwargs):
         calls.append(1)
         return bootstrap(*args, **kwargs)
 
-    monkeypatch.setattr(risk_module, "_night_type_bootstrap", counted_bootstrap)
+    monkeypatch.setattr(risk_module, "_bootstrap_nights", counted_bootstrap)
     summaries, contrasts = risk_type_analysis({"SPY": data}, block=10, n=200)
     assert len(calls) == 1
     pd.testing.assert_frame_equal(summaries.loc["SPY"], expected_summary)

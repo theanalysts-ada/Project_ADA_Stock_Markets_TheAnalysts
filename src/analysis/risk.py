@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
-from src.features.calendar import NIGHT_TYPES, attach_night_calendar
+from src.features.calendar import NIGHT_TYPES
 from src.analysis.crime import study_portfolios
 
 
@@ -18,13 +18,22 @@ def risk_samples(df: pd.DataFrame, calendar: pd.DataFrame) -> dict[str, pd.DataF
         Four daily tables with calendar columns. All market dates are retained for
         the bootstrap; a date without an observed return has a missing r_night.
     """
+    # Reuse a date-indexed calendar for all four portfolios. Building the
+    # portfolio table already aggregates to one row per date, so a reindex plus
+    # an index join is sufficient; merging twice per portfolio only to validate
+    # and then attach the same calendar columns does unnecessary work.
+    calendar_by_date = calendar.set_index("date", verify_integrity=True)
+    calendar_dates = calendar_by_date.index
     samples = {}
     for name, pair in study_portfolios(df).items():
         if pair.empty:
             raise ValueError(f"No observations for {name}")
-        attach_night_calendar(pair, calendar)  # validate dates only: raises if a date is outside the calendar
-        daily = pair.set_index("date").reindex(calendar["date"]).rename_axis("date").reset_index()
-        samples[name] = attach_night_calendar(daily, calendar)
+        missing = pd.Index(pair["date"].unique()).difference(calendar_dates)
+        if len(missing):
+            dates = pd.Series(missing).dt.strftime("%Y-%m-%d").tolist()[:5]
+            raise ValueError(f"Dates absent from the night calendar: {dates}")
+        daily = pair.set_index("date").reindex(calendar_dates)
+        samples[name] = daily.join(calendar_by_date, how="left", validate="one_to_one").reset_index()
     return samples
 
 
@@ -37,7 +46,7 @@ def _daily_sample(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values("date").reset_index(drop=True)
 
 
-def _night_type_bootstrap(
+def _bootstrap_nights(
     df: pd.DataFrame, block: int, n: int, seed: int,
 ) -> tuple[pd.DataFrame, list[str], np.ndarray, np.ndarray]:
     """Resample contiguous blocks of sessions, keeping returns and night types together."""
@@ -68,36 +77,36 @@ def _night_type_bootstrap(
     return data, names, means(np.arange(len(data))), draws
 
 
-def _type_summary(bootstrap: tuple) -> pd.DataFrame:
-    """Summarise an existing bootstrap, without rounding the estimates."""
+def _summarize_bootstrap(bootstrap: tuple) -> pd.DataFrame:
+    """Build the night-return summary from an existing bootstrap."""
     data, names, means, draws = bootstrap
-    rows = []
-    for i, name in enumerate(names):
-        group = data[data["night_type"].eq(name) & data["r_night"].notna()]
-        lo, hi = np.nanpercentile(draws[:, i], [2.5, 97.5])
-        rows.append({
-            "night_type": name, "n nights": len(group), "mean hours": group["night_hours"].mean(),
-            "mean (bp)": 10000 * means[i], "CI 95% low": 10000 * lo, "CI 95% high": 10000 * hi,
-        })
-    return pd.DataFrame(rows).set_index("night_type")
+    observed = data.loc[data["r_night"].notna()]
+    grouped = observed.groupby("night_type", observed=True).agg(
+        **{"n nights": ("r_night", "size"), "mean hours": ("night_hours", "mean")}
+    ).reindex(names)
+    low, high = np.nanpercentile(draws, [2.5, 97.5], axis=0)
+    return pd.DataFrame({
+        "n nights": grouped["n nights"], "mean hours": grouped["mean hours"],
+        "mean (bp)": 10000 * means, "CI 95% low": 10000 * low, "CI 95% high": 10000 * high,
+    }, index=pd.Index(names, name="night_type"))
 
 
-def _type_contrasts(bootstrap: tuple, reference: str) -> pd.DataFrame:
-    """Calculate differences within each draw, retaining their paired uncertainty."""
+def _bootstrap_contrasts(bootstrap: tuple, reference: str) -> pd.DataFrame:
+    """Compare night types within each draw to retain paired uncertainty."""
     _, names, means, draws = bootstrap
     if reference not in names:
         raise ValueError(f"No observed nights for reference type {reference}")
-    j = names.index(reference)
-    rows = []
-    for i, name in enumerate(names):
-        if name == reference:
-            continue
-        lo, hi = np.nanpercentile(draws[:, i] - draws[:, j], [2.5, 97.5])
-        rows.append({
-            "contrast": f"{name} - {reference}", "gap (bp)": 10000 * (means[i] - means[j]),
-            "CI 95% low": 10000 * lo, "CI 95% high": 10000 * hi,
-        })
-    return pd.DataFrame(rows, columns=["contrast", "gap (bp)", "CI 95% low", "CI 95% high"]).set_index("contrast")
+    indices = [i for i, name in enumerate(names) if name != reference]
+    columns = ["gap (bp)", "CI 95% low", "CI 95% high"]
+    if not indices:
+        return pd.DataFrame(columns=columns, index=pd.Index([], name="contrast"))
+    reference_index = names.index(reference)
+    differences = draws[:, indices] - draws[:, [reference_index]]
+    low, high = np.nanpercentile(differences, [2.5, 97.5], axis=0)
+    return pd.DataFrame({
+        "gap (bp)": 10000 * (means[indices] - means[reference_index]),
+        "CI 95% low": 10000 * low, "CI 95% high": 10000 * high,
+    }, index=pd.Index([f"{names[i]} - {reference}" for i in indices], name="contrast"))
 
 
 def night_type_summary(df: pd.DataFrame, block: int = 21, n: int = 1000, seed: int = 0) -> pd.DataFrame:
@@ -113,7 +122,7 @@ def night_type_summary(df: pd.DataFrame, block: int = 21, n: int = 1000, seed: i
         Counts, mean hours, mean return and 95 % interval in basis points per night.
         Draws without an observed return of a type are omitted for its interval.
     """
-    return _type_summary(_night_type_bootstrap(df, block, n, seed))
+    return _summarize_bootstrap(_bootstrap_nights(df, block, n, seed))
 
 
 def night_type_contrasts(
@@ -132,7 +141,7 @@ def night_type_contrasts(
         Differences and pointwise 95 % intervals in basis points per night.
         Draws missing either category are omitted; no multiplicity correction is applied.
     """
-    return _type_contrasts(_night_type_bootstrap(df, block, n, seed), reference)
+    return _bootstrap_contrasts(_bootstrap_nights(df, block, n, seed), reference)
 
 
 def risk_type_analysis(
@@ -153,9 +162,9 @@ def risk_type_analysis(
     """
     summaries, contrasts = {}, {}
     for name, data in samples.items():
-        bootstrap = _night_type_bootstrap(data, block, n, seed)
-        summaries[name] = _type_summary(bootstrap)
-        contrasts[name] = _type_contrasts(bootstrap, reference)
+        bootstrap = _bootstrap_nights(data, block, n, seed)
+        summaries[name] = _summarize_bootstrap(bootstrap)
+        contrasts[name] = _bootstrap_contrasts(bootstrap, reference)
     return pd.concat(summaries, names=["portfolio"]), pd.concat(contrasts, names=["portfolio"])
 
 

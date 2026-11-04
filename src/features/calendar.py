@@ -40,10 +40,17 @@ def build_night_calendar(start_date: str, end_date: str) -> pd.DataFrame:
     gap = (calendar["date"] - calendar["previous_session"]).dt.days
     previous_day = calendar["previous_session"].dt.dayofweek
     day = calendar["date"].dt.dayofweek
-    kind = pd.Series("Midweek holiday", index=calendar.index)
-    kind[gap == 1] = "Weekday"
-    kind[(gap == 3) & (previous_day == 4) & (day == 0)] = "Weekend"
-    kind[(gap >= 4) & (previous_day.isin([3, 4])) & (day.isin([0, 1]))] = "Long weekend"
+    long_weekend = (gap >= 4) & previous_day.isin([3, 4]) & day.isin([0, 1])
+    weekend = (gap == 3) & (previous_day == 4) & (day == 0)
+    kind = pd.Series(
+        np.select(
+            [long_weekend, weekend, gap == 1],
+            ["Long weekend", "Weekend", "Weekday"],
+            default="Midweek holiday",
+        ),
+        index=calendar.index,
+        dtype="object",
+    )
 
     adhoc = pd.DatetimeIndex(market.adhoc_holidays).tz_localize(None)
     adhoc = adhoc[adhoc.dayofweek < 5].sort_values().unique()
@@ -55,11 +62,13 @@ def build_night_calendar(start_date: str, end_date: str) -> pd.DataFrame:
     local_close = calendar["previous_close"].dt.tz_convert("America/New_York")
     local_open = calendar["market_open"].dt.tz_convert("America/New_York")
     calendar["previous_early_close"] = local_close.dt.hour < 16
-    close_offset = local_close.map(lambda t: t.utcoffset().total_seconds() / 3600)
-    open_offset = local_open.map(lambda t: t.utcoffset().total_seconds() / 3600)
-    change = open_offset - close_offset
+    # Compare local wall time with UTC wall time to get each timestamp's UTC
+    # offset as a vectorized timedelta, including historical DST transitions.
+    close_offset = local_close.dt.tz_localize(None) - calendar["previous_close"].dt.tz_localize(None)
+    open_offset = local_open.dt.tz_localize(None) - calendar["market_open"].dt.tz_localize(None)
+    change = (open_offset - close_offset).dt.total_seconds() / 3600
     calendar["dst_change"] = np.select([change > 0, change < 0], ["spring", "autumn"], default="none")
-    calendar["dst_monday"] = (day == 0) & change.ne(0)
+    calendar["dst_monday"] = (day == 0) & (change != 0)
     return calendar
 
 
