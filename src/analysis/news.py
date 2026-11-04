@@ -52,14 +52,15 @@ def assign_sessions(filings: pd.DataFrame, windows: pd.DataFrame) -> pd.DataFram
     known = filings["time_known"].to_numpy()
 
     # Session of each filing: the first session that closes after it (or that starts on or after its date).
-    by_time = np.searchsorted(windows["market_close"].to_numpy(), filings["accepted"].to_numpy(), side="right")
+    closes = windows["market_close"].to_numpy()
+    by_time = np.searchsorted(closes, filings["accepted"].to_numpy(), side="right")
     by_date = np.searchsorted(windows["date"].to_numpy(), filings["filing_date"].to_numpy(), side="left")
     i = np.where(known, by_time, by_date)
 
     # Drop filings outside the calendar.
     first_close = windows["previous_close"].iloc[0]
-    first_close_date = first_close.tz_convert("America/New_York").tz_localize(None).normalize()
-    after_start = np.where(known, filings["accepted"] > first_close, filings["filing_date"] > first_close_date)
+    first_date = first_close.tz_convert("America/New_York").tz_localize(None).normalize()
+    after_start = np.where(known, filings["accepted"] > first_close, filings["filing_date"] > first_date)
     inside = (i < len(windows)) & after_start
     filings, i, known = filings[inside].copy(), i[inside], known[inside]
 
@@ -214,8 +215,8 @@ def build_news_panel(
 
     # Sessions close to a filing: each filing session shifted by -quiet_window ... +quiet_window.
     filing_sessions = filings[["cik", "i"]].drop_duplicates()
-    near = [filing_sessions.assign(i=filing_sessions["i"] + k) for k in range(-quiet_window, quiet_window + 1)]
-    near = pd.concat(near).drop_duplicates()
+    shifts = range(-quiet_window, quiet_window + 1)
+    near = pd.concat([filing_sessions.assign(i=filing_sessions["i"] + k) for k in shifts]).drop_duplicates()
     near["near_filing"] = True
     panel = panel.merge(near, on=["cik", "i"], how="left")
     panel["quiet"] = panel["near_filing"].isna()
@@ -226,7 +227,11 @@ def build_news_panel(
 def daily_mean(df: pd.DataFrame) -> pd.DataFrame:
     """Equal-weighted overnight and intraday returns per date, with the number of stocks n."""
     by_date = df.groupby("date")
-    daily = pd.DataFrame({"r_night": by_date["r_night"].mean(), "r_day": by_date["r_day"].mean(), "n": by_date.size()})
+    daily = pd.DataFrame({
+        "r_night": by_date["r_night"].mean(),
+        "r_day": by_date["r_day"].mean(),
+        "n": by_date.size(),
+    })
     return daily.reset_index()
 
 
@@ -332,20 +337,14 @@ def quiet_gap_tests(portfolios: dict[str, pd.DataFrame]) -> pd.DataFrame:
     return pd.DataFrame.from_dict(rows, orient="index").round(3)
 
 
-def quiet_gap_by_period(portfolios: dict[str, pd.DataFrame], periods: list[tuple[int, int]] | None = None) -> pd.DataFrame:
-    """Night - day gap of the all and quiet portfolios in each period.
-
-    Args:
-        portfolios: Output of news_portfolios.
-        periods: (first year, last year) of each period. Default: 1998-2002 (no filing times),
-            2003-2007 and 2008-2020.
+def quiet_gap_by_period(portfolios: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Night - day gap of the all and quiet portfolios in 1998-2002, 2003-2007 and 2008-2020.
 
     Returns:
         One row per (period, portfolio): gap (%), CI, p-value and number of dates.
     """
-    periods = periods or [(1998, 2002), (2003, 2007), (2008, 2020)]
     rows = {}
-    for first, last in periods:
+    for first, last in [(1998, 2002), (2003, 2007), (2008, 2020)]:
         for name in ["all", "quiet"]:
             p = portfolios[name]
             in_period = p["date"].dt.year.between(first, last)
@@ -396,11 +395,12 @@ def news_regression(panel: pd.DataFrame, half: str = "night") -> pd.DataFrame:
     other = p[f"news_{half}"] & ~earnings
     clusters = np.column_stack([pd.factorize(p["date"])[0], pd.factorize(p["ticker"])[0]])
 
+    X = pd.DataFrame({"earnings 8-K": earnings.astype(float), "other 8-K": other.astype(float)})
+    X = X - X.groupby(p["date"]).transform("mean")
     rows = []
     for outcome, y in {f"r_{half}": r, f"|r_{half}|": r.abs()}.items():
-        data = pd.DataFrame({"y": y, "earnings 8-K": earnings.astype(float), "other 8-K": other.astype(float)})
-        data = data - data.groupby(p["date"]).transform("mean")
-        fit = sm.OLS(data["y"], data[["earnings 8-K", "other 8-K"]]).fit(cov_type="cluster", cov_kwds={"groups": clusters})
+        y = y - y.groupby(p["date"]).transform("mean")
+        fit = sm.OLS(y, X).fit(cov_type="cluster", cov_kwds={"groups": clusters})
         ci = fit.conf_int()
         for name in ["earnings 8-K", "other 8-K"]:
             rows.append({
@@ -448,7 +448,8 @@ def gap_by_issuer_group(stocks: pd.DataFrame, identity: pd.DataFrame) -> pd.Data
     }
     rows = {}
     for name, mask in groups.items():
-        group = stocks[stocks["ticker"].isin(identity.loc[mask, "ticker"])].dropna(subset=["r_night", "r_day"])
+        tickers = identity.loc[mask, "ticker"]
+        group = stocks[stocks["ticker"].isin(tickers)].dropna(subset=["r_night", "r_day"])
         test = gap_test(daily_mean(group))
         rows[name] = {"tickers": group["ticker"].nunique(), "stock-days": len(group)}
         rows[name].update({k: v for k, v in test.items() if k != "dates"})

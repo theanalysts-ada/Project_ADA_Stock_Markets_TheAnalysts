@@ -22,7 +22,8 @@ MIN_INTERVAL = 0.12
 FOREIGN_FORMS = ["6-K", "20-F", "40-F"]
 NAME_STOPWORDS = [
     "inc", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "lp", "llc", "sa", "nv", "ag",
-    "holdings", "holding", "group", "the", "class", "common", "stock", "shares", "ordinary", "of", "and", "com",
+    "holdings", "holding", "group", "the", "class", "common", "stock", "shares", "ordinary", "of", "and",
+    "com",
 ]
 
 _lock = threading.Lock()
@@ -234,7 +235,7 @@ def download_issuer(cik: int, start: str, end: str, cache: Path) -> dict:
     return issuer
 
 
-def collect_filings(ciks: list[int], start: str, end: str, out_dir: Path = EDGAR_DIR, workers: int = 4) -> None:
+def collect_filings(ciks: list[int], start: str, end: str, out_dir: Path = EDGAR_DIR, workers: int = 4):
     """Download the 8-Ks of every company and save them in two Parquet files.
 
     Each company is saved in out_dir/cache as soon as it is downloaded, so a run that stops can
@@ -297,7 +298,8 @@ def verify_identity(mapping: pd.DataFrame, issuers: pd.DataFrame, threshold: flo
     out["status"] = status
 
     out["is_verified"] = out["status"] == "verified"
-    out = out.sort_values(["ticker", "is_verified", "n_8k_period", "cik"], ascending=[True, False, False, True])
+    order = ["ticker", "is_verified", "n_8k_period", "cik"]
+    out = out.sort_values(order, ascending=[True, False, False, True])
     return out.drop_duplicates("ticker").drop(columns="is_verified").reset_index(drop=True)
 
 

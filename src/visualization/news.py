@@ -15,8 +15,9 @@ def plot_filing_times(profile: pd.DataFrame) -> plt.Figure:
     """
     fig, ax = plt.subplots()
     ax.axvspan(9.5, 16, color=DAY, alpha=0.12, label="Trading session (9:30–16:00)")
-    ax.bar(profile.index + 0.14, profile["earnings"], width=0.22, color=NIGHT, label="Earnings 8-Ks (item 2.02)")
-    ax.bar(profile.index + 0.36, profile["other 8-K"], width=0.22, color=BUY_HOLD, label="Other 8-Ks")
+    slots = profile.index
+    ax.bar(slots + 0.14, profile["earnings"], width=0.22, color=NIGHT, label="Earnings 8-Ks (item 2.02)")
+    ax.bar(slots + 0.36, profile["other 8-K"], width=0.22, color=BUY_HOLD, label="Other 8-Ks")
     ax.set(xlim=(0, 24), xticks=range(0, 25, 2), title="When do firms file their news?",
            xlabel="Filing time, New York (30-minute slots)", ylabel="Share of filings (%)")
     ax.legend(loc="upper left")
@@ -78,7 +79,8 @@ def plot_macro_paths(paths: dict[str, pd.DataFrame]) -> plt.Figure:
     fig, axes = plt.subplots(1, len(paths), sharey=True, figsize=(5.5 * len(paths), 4.5), squeeze=False)
     for ax, (name, p) in zip(axes[0], paths.items()):
         ax.plot(p["date"], p["night"], color=NIGHT, label="Overnight, all nights")
-        ax.plot(p["date"], p["night without releases"], color=NIGHT, ls="--", label="Overnight, cash on jobs / CPI nights")
+        label = "Overnight, cash on jobs / CPI nights"
+        ax.plot(p["date"], p["night without releases"], color=NIGHT, ls="--", label=label)
         ax.plot(p["date"], p["day"], color=DAY, label="Intraday")
         ax.set(yscale="log", title=name, xlabel="Date")
     axes[0][0].set_ylabel("Value of $1 (log scale)")
