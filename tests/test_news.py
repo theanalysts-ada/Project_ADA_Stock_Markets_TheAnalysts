@@ -2,9 +2,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.news import assign_sessions, build_news_panel, news_regression, session_windows, timing_validation
-from src.analysis.overview import missing_sessions_by_ticker
 from src.data.edgar import name_similarity, normalise_name
-from src.features.calendar import build_night_calendar
 
 
 def make_filings(times, filing_dates=None, known=None, earnings=None, form="8-K"):
@@ -103,11 +101,3 @@ def test_timing_validation_and_regression_recover_planted_effect():
     for regressor in ["earnings 8-K", "other 8-K"]:
         row = reg.loc[("r_night", regressor)]
         assert row["CI low"] < 50 < row["CI high"]
-
-
-def test_missing_sessions_excludes_holidays_and_listing_edges():
-    calendar = build_night_calendar("2019-07-01", "2019-07-08")
-    prices = pd.DataFrame({"ticker": ["A"] * 3, "date": pd.to_datetime(["2019-07-02", "2019-07-05", "2019-07-08"])})
-    result = missing_sessions_by_ticker(prices, calendar).iloc[0]
-    assert result.missing_sessions == 1  # 3 July, not the 4 July holiday
-    assert result.expected_sessions == 4

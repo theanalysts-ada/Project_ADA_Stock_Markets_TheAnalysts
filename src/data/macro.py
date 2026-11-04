@@ -47,9 +47,10 @@ def parse_fomc_headers(headers: list[str]) -> pd.DataFrame:
         if "Meeting" not in title or "unscheduled" in title or "cancelled" in title:
             continue
         days, year = title.split("Meeting")
-        months = [MONTHS.index(w[:3].lower()) + 1 for w in re.findall(r"[A-Za-z]+", days) if w[:3].lower() in MONTHS]
+        words = [w[:3].lower() for w in re.findall(r"[A-Za-z]+", days)]
+        month = [MONTHS.index(w) + 1 for w in words if w in MONTHS][-1]
         day = int(re.findall(r"\d+", days)[-1])
-        dates.append(pd.Timestamp(int(re.findall(r"\d{4}", year)[0]), months[-1], day))
+        dates.append(pd.Timestamp(int(re.findall(r"\d{4}", year)[0]), month, day))
     return pd.DataFrame({"date": dates})
 
 
@@ -82,7 +83,9 @@ def fomc_dates(start_year: int, end_year: int, out_dir: Path = MACRO_DIR) -> pd.
     return pd.DataFrame({"event": "FOMC", "date": dates, "release": release})
 
 
-def bls_release_dates(start: str, end: str, api_key: str | None = None, out_dir: Path = MACRO_DIR) -> pd.DataFrame:
+def bls_release_dates(
+    start: str, end: str, api_key: str | None = None, out_dir: Path = MACRO_DIR,
+) -> pd.DataFrame:
     """Release dates of the jobs report and the CPI, from the FRED API (saved in out_dir).
 
     Both come out at 8:30 New York time, before the open. FRED also lists a few corrections a few
@@ -98,7 +101,7 @@ def bls_release_dates(start: str, end: str, api_key: str | None = None, out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
         frames = []
         for event, query in FRED_QUERIES.items():
-            url = f"{FRED_URL}{query}&api_key={key}&file_type=json&realtime_start={start}&realtime_end={end}&limit=10000"
+            url = f"{FRED_URL}{query}&api_key={key}&file_type=json&realtime_start={start}&realtime_end={end}"
             answer = json.loads(download_text(url))
             if "release_dates" in answer:
                 dates = [d["date"] for d in answer["release_dates"]]
