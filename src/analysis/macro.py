@@ -58,7 +58,7 @@ def macro_regression(daily: pd.DataFrame, flags: pd.DataFrame, maxlags: int = 5)
     """Do release sessions earn more than the other sessions?
 
     Overnight return on jobs-report and CPI nights, and intraday return on FOMC days:
-    r_t = a + b * release_t + e_t, in bp, with HAC standard errors (5 lags, as in Part III).
+    r_t = a + b * release_t + e_t, in bp, with HAC standard errors (5 lags).
     The constant a is the mean of the other sessions, b the extra return of a release session.
 
     Args:

@@ -2,341 +2,217 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
-from src.features.calendar import NIGHT_TYPES
 from src.analysis.crime import study_portfolios
+from src.data.metadata import exclude_special_etfs
+from src.data.quality import FILTERS, apply_quality_filter
+from src.features.calendar import NIGHT_TYPES
+
+REFERENCE_NIGHT_HOURS = 17.5
 
 
 def risk_samples(df: pd.DataFrame, calendar: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Prepare the four Part II portfolios, with one observation per market night.
-
-    Args:
-        df: Part II study sample after quality and special-ETF exclusions, including
-            ticker, asset_type, date, r_night, r_day and dollar_volume.
-        calendar: Table returned by build_night_calendar for the study period.
-
-    Returns:
-        Four daily tables with calendar columns. All market dates are retained for
-        the bootstrap; a date without an observed return has a missing r_night.
-    """
-    # Reuse a date-indexed calendar for all four portfolios. Building the
-    # portfolio table already aggregates to one row per date, so a reindex plus
-    # an index join is sufficient; merging twice per portfolio only to validate
-    # and then attach the same calendar columns does unnecessary work.
-    calendar_by_date = calendar.set_index("date", verify_integrity=True)
-    calendar_dates = calendar_by_date.index
+    """Join each daily portfolio to the calendar, retaining sessions without returns."""
+    if calendar["night_hours"].isna().any():
+        raise ValueError("Night calendar contains missing closure durations")
     samples = {}
-    for name, pair in study_portfolios(df).items():
-        if pair.empty:
+    for name, portfolio in study_portfolios(df).items():
+        if portfolio.empty:
             raise ValueError(f"No observations for {name}")
-        missing = pd.Index(pair["date"].unique()).difference(calendar_dates)
-        if len(missing):
-            dates = pd.Series(missing).dt.strftime("%Y-%m-%d").tolist()[:5]
+        outside = ~portfolio["date"].isin(calendar["date"])
+        if outside.any():
+            dates = portfolio.loc[outside, "date"].dt.strftime("%Y-%m-%d").head(5).tolist()
             raise ValueError(f"Dates absent from the night calendar: {dates}")
-        daily = pair.set_index("date").reindex(calendar_dates)
-        samples[name] = daily.join(calendar_by_date, how="left", validate="one_to_one").reset_index()
+        samples[name] = calendar.merge(portfolio, on="date", how="left", validate="one_to_one")
     return samples
 
 
 def _daily_sample(df: pd.DataFrame) -> pd.DataFrame:
-    """Sort a daily sample and reject duplicate dates or infinite returns."""
+    """Order market nights and reject duplicate dates or infinite returns."""
     if df["date"].duplicated().any():
         raise ValueError("Risk analysis requires one observation per date; aggregate tickers first")
-    if np.isinf(df["r_night"].astype("float64")).any():
+    data = df.sort_values("date").reset_index(drop=True)
+    data["r_night"] = data["r_night"].astype("float64")
+    if np.isinf(data["r_night"]).any():
         raise ValueError("Overnight returns must be finite or missing")
-    return df.sort_values("date").reset_index(drop=True)
+    return data
 
 
-def _bootstrap_nights(
-    df: pd.DataFrame, block: int, n: int, seed: int,
-) -> tuple[pd.DataFrame, list[str], np.ndarray, np.ndarray]:
-    """Resample contiguous blocks of sessions, keeping returns and night types together."""
-    data = _daily_sample(df)
+def _routine_nights(data: pd.DataFrame) -> pd.DataFrame:
+    """Exclude exceptional returns while retaining the session grid for bootstrap blocks."""
+    routine = data.copy()
+    routine.loc[routine["night_type"] == "Exceptional closure", "r_night"] = np.nan
+    return routine
+
+
+def _block_samples(data: pd.DataFrame, block: int, n: int, seed: int):
+    """Resample complete session rows in contiguous blocks, retaining missing returns."""
     if not 1 <= block <= len(data) or n < 2:
         raise ValueError("block must be between 1 and the sample size; n must be at least 2")
-    valid = data["r_night"].notna() & data["night_type"].notna()
-    names = [name for name in NIGHT_TYPES if (valid & data["night_type"].eq(name)).any()]
-    if not names:
-        raise ValueError("No observed overnight returns with a night type")
-    codes = pd.Categorical(data["night_type"], categories=names).codes
-    values = data["r_night"].to_numpy(dtype="float64")
-
-    def means(indices: np.ndarray) -> np.ndarray:
-        selected_codes, selected_values = codes[indices], values[indices]
-        keep = (selected_codes >= 0) & np.isfinite(selected_values)
-        counts = np.bincount(selected_codes[keep], minlength=len(names))
-        sums = np.bincount(selected_codes[keep], weights=selected_values[keep], minlength=len(names))
-        return np.divide(sums, counts, out=np.full(len(names), np.nan), where=counts > 0)
-
     rng = np.random.default_rng(seed)
     n_blocks = int(np.ceil(len(data) / block))
-    draws = np.empty((n, len(names)))
-    for i in range(n):
+    for _ in range(n):
         starts = rng.integers(0, len(data) - block + 1, size=n_blocks)
-        indices = (starts[:, None] + np.arange(block)).ravel()[:len(data)]
-        draws[i] = means(indices)
-    return data, names, means(np.arange(len(data))), draws
+        positions = np.concatenate([np.arange(start, start + block) for start in starts])
+        yield data.iloc[positions[:len(data)]]
 
 
-def _summarize_bootstrap(bootstrap: tuple) -> pd.DataFrame:
-    """Build the night-return summary from an existing bootstrap."""
-    data, names, means, draws = bootstrap
-    observed = data.loc[data["r_night"].notna()]
-    grouped = observed.groupby("night_type", observed=True).agg(
-        **{"n nights": ("r_night", "size"), "mean hours": ("night_hours", "mean")}
-    ).reindex(names)
-    low, high = np.nanpercentile(draws, [2.5, 97.5], axis=0)
-    return pd.DataFrame({
-        "n nights": grouped["n nights"], "mean hours": grouped["mean hours"],
-        "mean (bp)": 10000 * means, "CI 95% low": 10000 * low, "CI 95% high": 10000 * high,
-    }, index=pd.Index(names, name="night_type"))
+def _bootstrap_nights(data: pd.DataFrame, block: int, n: int, seed: int) -> pd.DataFrame:
+    """Average returns by night type in each block-bootstrap sample."""
+    observed = data.loc[data["r_night"].notna(), "night_type"].dropna().unique()
+    names = [name for name in NIGHT_TYPES if name in observed]
+    if not names:
+        raise ValueError("No observed overnight returns with a night type")
+
+    returns = data[["night_type", "r_night"]]
+    draws = []
+    for sample in _block_samples(returns, block, n, seed):
+        means = sample.groupby("night_type", observed=True)["r_night"].mean()
+        draws.append(means.reindex(names))
+    return pd.DataFrame(draws).reset_index(drop=True)
 
 
-def _bootstrap_contrasts(bootstrap: tuple, reference: str) -> pd.DataFrame:
-    """Compare night types within each draw to retain paired uncertainty."""
-    _, names, means, draws = bootstrap
-    if reference not in names:
-        raise ValueError(f"No observed nights for reference type {reference}")
-    indices = [i for i, name in enumerate(names) if name != reference]
-    columns = ["gap (bp)", "CI 95% low", "CI 95% high"]
-    if not indices:
-        return pd.DataFrame(columns=columns, index=pd.Index([], name="contrast"))
-    reference_index = names.index(reference)
-    differences = draws[:, indices] - draws[:, [reference_index]]
-    low, high = np.nanpercentile(differences, [2.5, 97.5], axis=0)
-    return pd.DataFrame({
-        "gap (bp)": 10000 * (means[indices] - means[reference_index]),
-        "CI 95% low": 10000 * low, "CI 95% high": 10000 * high,
-    }, index=pd.Index([f"{names[i]} - {reference}" for i in indices], name="contrast"))
+def risk_type_analysis(samples, reference="Weekday", block=21, n=1000, seed=0):
+    """Return routine-closure means and contrasts with 95% block-bootstrap intervals.
 
-
-def night_type_summary(df: pd.DataFrame, block: int = 21, n: int = 1000, seed: int = 0) -> pd.DataFrame:
-    """Compare closure-type means with pointwise block-bootstrap intervals.
-
-    Args:
-        df: One row per session, with date, r_night, night_hours and night_type.
-        block: Number of consecutive sessions per bootstrap block.
-        n: Number of bootstrap resamples.
-        seed: Random seed for reproducible intervals.
-
-    Returns:
-        Counts, mean hours, mean return and 95 % interval in basis points per night.
-        Draws without an observed return of a type are omitted for its interval.
+    Results are in basis points per night. Excluded and missing returns remain in the session
+    sequence when sampling blocks. Intervals omit draws missing a category and
+    are pointwise, without adjustment for multiple comparisons.
     """
-    return _summarize_bootstrap(_bootstrap_nights(df, block, n, seed))
-
-
-def night_type_contrasts(
-    df: pd.DataFrame, reference: str = "Weekday", block: int = 21, n: int = 1000, seed: int = 0,
-) -> pd.DataFrame:
-    """Estimate differences from the reference type within bootstrap draws.
-
-    Args:
-        df: Daily sample accepted by night_type_summary.
-        reference: Night type subtracted from each other type.
-        block: Number of consecutive sessions per bootstrap block.
-        n: Number of bootstrap resamples.
-        seed: Random seed for reproducible intervals.
-
-    Returns:
-        Differences and pointwise 95 % intervals in basis points per night.
-        Draws missing either category are omitted; no multiplicity correction is applied.
-    """
-    return _bootstrap_contrasts(_bootstrap_nights(df, block, n, seed), reference)
-
-
-def risk_type_analysis(
-    samples: dict[str, pd.DataFrame], reference: str = "Weekday", block: int = 21, n: int = 1000, seed: int = 0,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Compute means and contrasts from one bootstrap per portfolio.
-
-    Args:
-        samples: Daily tables returned by risk_samples.
-        reference: Closure type subtracted in each contrast.
-        block: Number of consecutive sessions per bootstrap block.
-        n: Number of bootstrap resamples.
-        seed: Random seed for reproducible intervals.
-
-    Returns:
-        Summary and contrast tables indexed by portfolio, in basis points per night.
-        Full precision is retained for plots and later transformations.
-    """
-    summaries, contrasts = {}, {}
+    summaries, contrasts = [], []
     for name, data in samples.items():
-        bootstrap = _bootstrap_nights(data, block, n, seed)
-        summaries[name] = _summarize_bootstrap(bootstrap)
-        contrasts[name] = _bootstrap_contrasts(bootstrap, reference)
-    return pd.concat(summaries, names=["portfolio"]), pd.concat(contrasts, names=["portfolio"])
+        data = _routine_nights(_daily_sample(data))
+        draws = _bootstrap_nights(data, block, n, seed)
+        if reference not in draws.columns:
+            raise ValueError(f"No observed nights for reference type {reference}")
 
+        observed = data.loc[data["r_night"].notna()]
+        summary = observed.groupby("night_type", observed=True).agg(
+            n_nights=("r_night", "size"), mean_hours=("night_hours", "mean"),
+            mean_return=("r_night", "mean"),
+        ).reindex(draws.columns)
+        summary["mean (bp)"] = 10000 * summary.pop("mean_return")
+        summary["CI 95% low"] = 10000 * draws.quantile(0.025)
+        summary["CI 95% high"] = 10000 * draws.quantile(0.975)
+        summary = summary.rename(columns={"n_nights": "n nights", "mean_hours": "mean hours"})
+        summary["portfolio"] = name
+        summaries.append(summary.rename_axis("night_type").reset_index())
 
-def _duration_fit(df: pd.DataFrame, log: bool, maxlags: int):
-    """Fit the common duration model for coefficient and mean-return inference."""
-    data = _daily_sample(df).dropna(subset=["r_night", "night_hours"])
-    if maxlags < 0 or len(data) <= maxlags + 2 or data["night_hours"].nunique() < 2:
-        raise ValueError("Need varying durations and more than maxlags + 2 observed nights")
-    values = data["r_night"].astype("float64")
-    if log:
-        if (values <= -1).any():
-            raise ValueError("Log returns require r_night > -1")
-        values = np.log1p(values)
-    design = sm.add_constant(data["night_hours"].astype("float64"), has_constant="add")
-    return sm.OLS(10000 * values, design).fit(cov_type="HAC", cov_kwds={"maxlags": maxlags})
-
-
-def duration_regression(df: pd.DataFrame, log: bool = False, maxlags: int = 5) -> pd.DataFrame:
-    """Regress overnight returns on closure duration, with HAC standard errors.
-
-    r_night(t) = alpha + beta * night_hours(t) + error(t). The coefficient describes
-    an association: duration also varies with weekdays, holidays and exceptional news.
-
-    Args:
-        df: One row per date, with date, r_night and night_hours.
-        log: Use log(1 + r_night) instead of the simple return.
-        maxlags: Number of ordered observations used for the HAC covariance (default: 5).
-
-    Returns:
-        One row: beta and its 95 % interval (basis points per extra hour), p-value,
-        number of observed nights, HAC lag count and R-squared. Nothing is annualised.
-    """
-    fit = _duration_fit(df, log, maxlags)
-    lo, hi = fit.conf_int().loc["night_hours"]
-    return pd.DataFrame([{
-        "beta (bp/hour)": fit.params["night_hours"], "CI 95% low": lo, "CI 95% high": hi,
-        "p-value": fit.pvalues["night_hours"], "n nights": int(fit.nobs),
-        "HAC lags": maxlags, "R-squared": fit.rsquared,
-    }])
-
-
-def duration_predictions(samples: dict[str, pd.DataFrame], maxlags: int = 5) -> pd.DataFrame:
-    """Predict mean simple returns with pointwise 95 % HAC confidence intervals.
-
-    Fits use all observed nights, including exceptional closures. Display grids
-    cover observed routine closure durations only. Bands describe uncertainty
-    in the fitted mean, not the dispersion of individual nightly returns.
-    The slope and its 95 % HAC interval are repeated on every row.
-    """
-    predictions = {}
-    for name, data in samples.items():
-        fit = _duration_fit(data, log=False, maxlags=maxlags)
-        ordinary = data.loc[data["night_type"].ne("Exceptional closure") & data["r_night"].notna(), "night_hours"]
-        hours = np.linspace(ordinary.min(), ordinary.max(), 200)
-        design = sm.add_constant(pd.DataFrame({"night_hours": hours}), has_constant="add")
-        frame = fit.get_prediction(design).summary_frame(alpha=0.05)
-        slope_low, slope_high = fit.conf_int().loc["night_hours"]
-        predictions[name] = pd.DataFrame({
-            "night_hours": hours, "mean (bp)": frame["mean"],
-            "beta (bp/hour)": fit.params["night_hours"],
-            "beta CI low": slope_low, "beta CI high": slope_high,
-            "CI 95% low": frame["mean_ci_lower"], "CI 95% high": frame["mean_ci_upper"],
+        differences = draws.subtract(draws[reference], axis="index").drop(columns=reference)
+        means = summary["mean (bp)"]
+        contrast = pd.DataFrame({
+            "gap (bp)": means.drop(reference) - means.loc[reference],
+            "CI 95% low": 10000 * differences.quantile(0.025),
+            "CI 95% high": 10000 * differences.quantile(0.975),
         })
-    return pd.concat(predictions, names=["portfolio", "point"])
+        contrast.index = contrast.index.astype(str) + " - " + reference
+        contrast["portfolio"] = name
+        contrasts.append(contrast.rename_axis("contrast").reset_index())
+    return pd.concat(summaries, ignore_index=True), pd.concat(contrasts, ignore_index=True)
 
 
-def duration_tests_by_period(samples: dict[str, pd.DataFrame], maxlags: int = 5) -> pd.DataFrame:
-    """Compare the duration slope before and after 2008, using simple and log returns.
+def _duration_fit(data: pd.DataFrame):
+    """Fit return = mu + beta * (hours - 17.5), in basis points."""
+    observed = data.dropna(subset=["r_night", "night_hours"])
+    if len(observed) < 3 or observed["night_hours"].nunique() < 2:
+        raise ValueError("Each regression sample needs at least three nights and varying durations")
+    hours = observed["night_hours"].astype("float64") - REFERENCE_NIGHT_HOURS
+    design = sm.add_constant(hours, has_constant="add")
+    return sm.OLS(10000 * observed["r_night"], design).fit()
 
-    Args:
-        samples: Daily tables returned by risk_samples.
-        maxlags: Number of ordered observations used for the HAC covariance.
 
-    Returns:
-        One regression row per (portfolio, period, return type); beta and intervals
-        are in basis points per extra hour. The full period comes first; labels
-        follow the input dates. The 2008 split is included when both sides are present.
+def _bootstrap_duration(df: pd.DataFrame, block: int, n: int, seed: int):
+    """Fit the observed sample and resample duration-return pairs in session blocks."""
+    data = _daily_sample(df)[["night_hours", "r_night"]]
+    fit = _duration_fit(data)
+    draws = [_duration_fit(sample).params for sample in _block_samples(data, block, n, seed)]
+    return fit, pd.DataFrame(draws).reset_index(drop=True)
+
+
+def _regression_result(fit, draws: pd.DataFrame, block: int) -> dict:
+    """Report coefficients and bootstrap intervals; mu - 17.5 * beta tests proportionality."""
+    low, high = draws.quantile(0.025), draws.quantile(0.975)
+    gap = draws["const"] - REFERENCE_NIGHT_HOURS * draws["night_hours"]
+    return {
+        "mu (bp/night)": fit.params["const"],
+        "mu CI low": low["const"], "mu CI high": high["const"],
+        "beta (bp/hour)": fit.params["night_hours"],
+        "CI 95% low": low["night_hours"], "CI 95% high": high["night_hours"],
+        "proportionality gap (bp)": fit.params["const"] - REFERENCE_NIGHT_HOURS * fit.params["night_hours"],
+        "proportionality CI low": gap.quantile(0.025),
+        "proportionality CI high": gap.quantile(0.975),
+        "n nights": int(fit.nobs), "block sessions": block,
+        "bootstrap resamples": len(draws), "R-squared": fit.rsquared,
+    }
+
+
+def duration_regression(df: pd.DataFrame, block=21, n=1000, seed=0) -> dict:
+    """Return duration estimates and percentile block-bootstrap intervals."""
+    fit, draws = _bootstrap_duration(df, block, n, seed)
+    return _regression_result(fit, draws, block)
+
+
+def _prediction_curve(fit, draws: pd.DataFrame, data: pd.DataFrame) -> pd.DataFrame:
+    """Predict routine-closure means with pointwise bootstrap intervals."""
+    routine = data.loc[(data["night_type"] != "Exceptional closure") & data["r_night"].notna()]
+    if routine.empty:
+        raise ValueError("Need observed routine closures to plot duration predictions")
+    hours = np.linspace(routine["night_hours"].min(), routine["night_hours"].max(), 200)
+    design = sm.add_constant(pd.DataFrame({"night_hours": hours - REFERENCE_NIGHT_HOURS}), has_constant="add")
+    curves = pd.DataFrame({
+        hour: draws["const"] + draws["night_hours"] * (hour - REFERENCE_NIGHT_HOURS)
+        for hour in hours
+    })
+    return pd.DataFrame({
+        "night_hours": hours, "mean (bp)": fit.predict(design),
+        "CI 95% low": curves.quantile(0.025).to_numpy(),
+        "CI 95% high": curves.quantile(0.975).to_numpy(),
+    })
+
+
+def duration_analysis(samples: dict[str, pd.DataFrame], n=1000, seed=0):
+    """Fit the duration model and robustness checks over the full study period.
+
+    The main model uses routine closures, simple returns and 21-session blocks.
+    Its bootstrap draws also supply the prediction bands.
     """
-    rows = []
+    results, predictions = [], []
     for name, data in samples.items():
-        first_year, last_year = data["date"].dt.year.min(), data["date"].dt.year.max()
-        periods = {f"{first_year}–{last_year}": data}
-        if first_year < 2008 <= last_year:
-            periods[f"{first_year}–2007"] = data[data["date"].dt.year <= 2007]
-            periods[f"2008–{last_year}"] = data[data["date"].dt.year >= 2008]
-        for period, subset in periods.items():
-            for log, kind in ((False, "simple"), (True, "log")):
-                row = duration_regression(subset, log=log, maxlags=maxlags).iloc[0].to_dict()
-                rows.append({"portfolio": name, "period": period, "return": kind, **row})
-    return pd.DataFrame(rows).set_index(["portfolio", "period", "return"]).astype({"n nights": int, "HAC lags": int})
+        all_nights = data
+        data = _routine_nights(data)
+        fit, draws = _bootstrap_duration(data, 21, n, seed)
+        row = _regression_result(fit, draws, block=21)
+        row.update(portfolio=name, specification="Main, 21-session blocks")
+        results.append(row)
+        curve = _prediction_curve(fit, draws, data)
+        curve["portfolio"] = name
+        predictions.append(curve)
+
+        checks = [("5-session blocks", data, 5), ("63-session blocks", data, 63),
+                  ("Include exceptional full-day closures", all_nights, 21)]
+        for specification, subset, block in checks:
+            row = duration_regression(subset, block=block, n=n, seed=seed)
+            row.update(portfolio=name, specification=specification)
+            results.append(row)
+    return pd.DataFrame(results), pd.concat(predictions, ignore_index=True)
 
 
-def duration_robustness(samples: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Check the slope with a longer HAC lag window and without exceptional closures.
+def risk_filter_comparison(prices, calendar, start_year, meta, n=1000, seed=0) -> pd.DataFrame:
+    """Fit routine closures under alternative quality filters."""
+    columns = ["date", "ticker", "asset_type", "r_night", "r_day", "dollar_volume"]
+    for drop_flags in FILTERS.values():
+        for flag in drop_flags:
+            if flag not in columns:
+                columns.append(flag)
+    prices = prices[columns]
 
-    Args:
-        samples: Daily tables returned by risk_samples.
-
-    Returns:
-        One regression row per portfolio and specification, in basis points per hour.
-    """
-    rows = []
-    for name, data in samples.items():
-        variants = {
-            "Main, HAC 5": (data, 5),
-            "HAC 21": (data, 21),
-            "Exclude exceptional full-day closures": (data[data["night_type"] != "Exceptional closure"], 5),
-        }
-        for specification, (subset, lags) in variants.items():
-            row = duration_regression(subset, maxlags=lags).iloc[0].to_dict()
-            rows.append({"portfolio": name, "specification": specification, **row})
-    return pd.DataFrame(rows).set_index(["portfolio", "specification"]).astype({"n nights": int, "HAC lags": int})
-
-
-def proportionality_tests(samples: dict[str, pd.DataFrame], maxlags: int = 5) -> pd.DataFrame:
-    """Test strict proportionality to closure hours in the linear duration model.
-
-    In r_night(t) = alpha + beta * night_hours(t) + error(t), a return proportional to
-    elapsed hours (calendar time) implies alpha = 0; a fixed premium per night implies
-    beta = 0. An interval containing zero does not establish that beta is zero.
-
-    Args:
-        samples: Daily tables returned by risk_samples.
-        maxlags: Number of ordered observations used for the HAC covariance.
-
-    Returns:
-        One row per portfolio and sample (all nights, routine closures): alpha in bp
-        per night and beta in bp per hour with 95 % HAC intervals, and a p-value
-        for alpha = 0. Alpha is the fitted return at zero closure hours.
-    """
-    rows = []
-    for name, data in samples.items():
-        subsets = {
-            "All nights": data,
-            "Routine closures": data[data["night_type"] != "Exceptional closure"],
-        }
-        for sample, subset in subsets.items():
-            fit = _duration_fit(subset, log=False, maxlags=maxlags)
-            ci = fit.conf_int()
-            rows.append({
-                "portfolio": name, "sample": sample,
-                "alpha (bp/night)": fit.params["const"],
-                "alpha CI low": ci.loc["const", 0], "alpha CI high": ci.loc["const", 1],
-                "p-value alpha = 0": fit.pvalues["const"],
-                "beta (bp/hour)": fit.params["night_hours"],
-                "CI 95% low": ci.loc["night_hours", 0], "CI 95% high": ci.loc["night_hours", 1],
-                "n nights": int(fit.nobs),
-            })
-    return pd.DataFrame(rows).set_index(["portfolio", "sample"])
-
-
-def risk_filter_comparison(prices: pd.DataFrame, calendar: pd.DataFrame, start_year: int, meta: pd.DataFrame) -> pd.DataFrame:
-    """Repeat the duration regression under Part I's three quality filters.
-
-    Args:
-        prices: Full flagged price table, with returns calculated before filtering.
-        calendar: Table returned by build_night_calendar for the study period.
-        start_year: First study year.
-        meta: Tagged ETF metadata from tag_special_etfs, as used in Part II.
-
-    Returns:
-        One regression row per portfolio and filter, in basis points per extra hour.
-    """
-    from src.data.quality import FILTERS, apply_quality_filter
-    from src.data.metadata import exclude_special_etfs
-    flags = sorted({flag for group in FILTERS.values() for flag in group})
-    slim = prices[["date", "ticker", "asset_type", "r_night", "r_day", "dollar_volume", *flags]]
-    rows = []
-    for name, flags in FILTERS.items():
-        sample = apply_quality_filter(slim, start_year=start_year, drop_flags=flags)
+    results = []
+    for filter_name, drop_flags in FILTERS.items():
+        if filter_name == "liquidity":
+            continue
+        sample = apply_quality_filter(prices, start_year=start_year, drop_flags=drop_flags)
         sample = exclude_special_etfs(sample, meta)
-        for portfolio, data in risk_samples(sample, calendar).items():
-            row = duration_regression(data).iloc[0].to_dict()
-            rows.append({"portfolio": portfolio, "filter": name, **row})
-    return pd.DataFrame(rows).set_index(["portfolio", "filter"]).astype({"n nights": int, "HAC lags": int})
+        for name, data in risk_samples(sample, calendar).items():
+            row = duration_regression(_routine_nights(data), n=n, seed=seed)
+            row.update(portfolio=name, filter=filter_name)
+            results.append(row)
+    return pd.DataFrame(results)
