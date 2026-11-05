@@ -1,5 +1,10 @@
 /data/*
 !/data/macro/
+!/data/edgar/
+/data/edgar/*
+!/data/edgar/mapping.parquet
+!/data/edgar/issuers.parquet
+!/data/edgar/filings_8k.parquet
 __pycache__/
 .ipynb_checkpoints/
 .DS_Store
