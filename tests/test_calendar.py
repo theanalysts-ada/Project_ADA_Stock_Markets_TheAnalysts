@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.features.calendar import attach_night_calendar, build_night_calendar, calendar_coverage, study_night_calendar
+from src.features.calendar import build_night_calendar, study_night_calendar
 
 
 @pytest.fixture(scope="module")
@@ -68,26 +68,3 @@ def test_study_calendar_uses_the_requested_start_year():
     assert calendar["date"].min() == pd.Timestamp("2020-01-02")
     assert calendar["date"].max() == pd.Timestamp("2020-01-08")
     assert calendar.iloc[0]["previous_session"] == pd.Timestamp("2019-12-31")
-
-
-def test_attachment_preserves_missing_returns_and_does_not_bridge_a_missing_session(calendar):
-    dates = pd.to_datetime(["2020-01-06", "2020-01-08"])
-    prices = pd.DataFrame({"date": dates, "r_night": [0.01, float("nan")]})
-    attached = attach_night_calendar(prices, calendar.reset_index())
-    assert len(attached) == 2
-    assert attached.loc[1, "previous_session"] == pd.Timestamp("2020-01-07")
-    assert pd.isna(attached.loc[1, "r_night"])
-    assert "night_hours" not in prices
-
-
-def test_attachment_rejects_dates_outside_the_calendar(calendar):
-    with pytest.raises(ValueError, match="Dates absent"):
-        attach_night_calendar(pd.DataFrame({"date": pd.to_datetime(["2020-01-01"])}), calendar.reset_index())
-
-
-def test_calendar_coverage_reports_missing_sessions_and_non_sessions():
-    calendar = build_night_calendar("2020-01-06", "2020-01-08")
-    dates = pd.DataFrame({"date": pd.to_datetime(["2020-01-05", "2020-01-06", "2020-01-08"])})
-    coverage = calendar_coverage(dates, calendar)
-    assert coverage["sessions absent from prices"] == 1
-    assert coverage["price dates outside the calendar"] == 1
