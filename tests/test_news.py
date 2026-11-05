@@ -6,7 +6,6 @@ from src.data.edgar import name_similarity, normalise_name
 
 
 def make_filings(times, filing_dates=None, known=None, earnings=None, form="8-K"):
-    """Small table of filings with the columns of load_filings."""
     accepted = pd.to_datetime(pd.Series(times), utc=True)
     accepted_ny = accepted.dt.tz_convert("America/New_York")
     if filing_dates is None:
@@ -14,27 +13,24 @@ def make_filings(times, filing_dates=None, known=None, earnings=None, form="8-K"
     n = len(times)
     return pd.DataFrame({
         "cik": 1,
-        "accession": [f"a{i}" for i in range(n)],
         "form": form,
         "filing_date": pd.to_datetime(filing_dates),
         "accepted": accepted,
         "accepted_ny": accepted_ny,
         "time_known": known if known is not None else [True] * n,
-        "items": "",
         "earnings": earnings if earnings is not None else [False] * n,
     })
 
 
 def test_night_and_day_around_holiday_and_early_close():
     windows = session_windows("2019-07-01", "2019-07-09")
-    # 3 July 2019 closes at 13:00 New York (17:00 UTC); 4 July is a holiday.
     filings = make_filings([
-        "2019-07-03T16:59:00Z",  # 12:59 New York, before the early close: day of 3 July
-        "2019-07-03T17:01:00Z",  # after the early close: night of 5 July
-        "2019-07-04T15:00:00Z",  # holiday: night of 5 July
-        "2019-07-05T13:29:00Z",  # 09:29: night of 5 July
-        "2019-07-05T13:30:00Z",  # 09:30, the open: day of 5 July
-        "2019-07-05T20:30:00Z",  # 16:30 Friday: night of Monday 8 July
+        "2019-07-03T16:59:00Z",
+        "2019-07-03T17:01:00Z",
+        "2019-07-04T15:00:00Z",
+        "2019-07-05T13:29:00Z",
+        "2019-07-05T13:30:00Z",
+        "2019-07-05T20:30:00Z",
     ])
     out = assign_sessions(filings, windows)
     assert out["timing"].tolist() == ["day", "night", "night", "night", "day", "night"]
@@ -54,7 +50,7 @@ def test_panel_flags_and_quiet_window():
     dates = windows.loc[windows["date"].between("2019-07-01", "2019-07-31"), "date"]
     stocks = pd.DataFrame({"ticker": "A", "date": dates, "r_night": 0.0, "r_day": 0.0})
     identity = pd.DataFrame({"ticker": ["A"], "cik": [1], "first_filing": ["1996-01-01"], "status": ["verified"]})
-    filings = make_filings(["2019-07-15T20:30:00Z"], earnings=[True])  # Monday 16:30: night of Tuesday 16 July
+    filings = make_filings(["2019-07-15T20:30:00Z"], earnings=[True])
     panel = build_news_panel(stocks, identity, assign_sessions(filings, windows), windows, start_year=2019)
     row = panel.set_index("date")
     assert row.loc["2019-07-16", "news_night"] and row.loc["2019-07-16", "earnings_night"]
@@ -88,7 +84,6 @@ def test_timing_validation_and_regression_recover_planted_effect():
     panel["news_night"] = rng.random(len(panel)) < 0.1
     panel["news_day"] = ~panel["news_night"] & (rng.random(len(panel)) < 0.1)
     panel["earnings_night"] = panel["news_night"] & (rng.random(len(panel)) < 0.5)
-    panel["earnings_day"] = False
     panel["unknown"] = False
     panel["timed"] = True
     market = np.tile(rng.normal(0, 1e-2, n_d), n_t)
@@ -97,7 +92,7 @@ def test_timing_validation_and_regression_recover_planted_effect():
     check = timing_validation(panel)
     assert check.loc["day 8-K only", "|r_day| (bp)"] > 5 * check.loc["no 8-K", "|r_day| (bp)"]
     assert check.loc["day 8-K only", "|r_night| (bp)"] < 2 * check.loc["no 8-K", "|r_night| (bp)"]
-    reg = news_regression(panel, "night")
+    reg = news_regression(panel)
     for regressor in ["earnings 8-K", "other 8-K"]:
         row = reg.loc[("r_night", regressor)]
         assert row["CI low"] < 50 < row["CI high"]

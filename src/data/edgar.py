@@ -17,7 +17,7 @@ TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 NAMES_URL = "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/"
 
-# The SEC allows at most 10 requests per second: https://www.sec.gov/os/accessing-edgar-data
+# SEC limit: 10 requests per second.
 MIN_INTERVAL = 0.12
 FOREIGN_FORMS = ["6-K", "20-F", "40-F"]
 NAME_STOPWORDS = [
@@ -31,20 +31,12 @@ _last_request = 0.0
 
 
 def sec_headers() -> dict:
-    """HTTP headers for the SEC, which requires a name and an email (SEC_USER_AGENT variable)."""
+    """The SEC asks for a name and an email in the User-Agent (SEC_USER_AGENT variable)."""
     return {"User-Agent": os.environ["SEC_USER_AGENT"]}
 
 
 def get_json(url: str, retries: int = 5) -> dict:
-    """Download a JSON file from the SEC, waiting between requests and retrying on errors.
-
-    Args:
-        url: SEC URL.
-        retries: Number of attempts before the error is raised.
-
-    Returns:
-        The decoded JSON.
-    """
+    """Download a JSON file from the SEC, at most 10 requests per second, with retries."""
     global _last_request
     for attempt in range(retries):
         with _lock:
@@ -62,10 +54,7 @@ def get_json(url: str, retries: int = 5) -> dict:
 
 
 def normalise_name(name: str) -> str:
-    """Lower-case company name without punctuation, share class or legal suffix.
-
-    For example "Apple Inc. - Common Stock" becomes "apple" and "APPLE COMPUTER INC" becomes "apple computer".
-    """
+    """Company name in lower case, without punctuation or legal suffix ("Apple Inc." -> "apple")."""
     name = str(name).lower().split(" - ")[0]
     name = name.replace("&", " and ")
     name = re.sub(r"['’.]", "", name)
@@ -74,10 +63,9 @@ def normalise_name(name: str) -> str:
 
 
 def name_similarity(a: str, b: str) -> float:
-    """Similarity between two company names, from 0 to 1.
+    """Similarity of two company names, from 0 to 1.
 
-    We take the larger of two scores: the difflib ratio of the two strings, and the share of the
-    words of the shorter name that appear in the longer one ("apple" in "apple computer").
+    Maximum of the difflib ratio and of the share of the words of the shorter name found in the longer one.
     """
     a, b = normalise_name(a), normalise_name(b)
     if a == "" or b == "":
@@ -88,11 +76,7 @@ def name_similarity(a: str, b: str) -> float:
 
 
 def sec_ticker_table() -> pd.DataFrame:
-    """Today's SEC table of tickers and CIKs.
-
-    Returns:
-        One row per ticker: ticker, cik and sec_name.
-    """
+    """Today's SEC tickers, with cik and sec_name."""
     raw = get_json(TICKERS_URL)
     sec = pd.DataFrame(list(raw.values()))
     sec = sec.rename(columns={"cik_str": "cik", "title": "sec_name"})
@@ -101,18 +85,9 @@ def sec_ticker_table() -> pd.DataFrame:
 
 
 def map_tickers(meta: pd.DataFrame, sec: pd.DataFrame) -> pd.DataFrame:
-    """Match each stock of the dataset to a CIK through its ticker.
+    """Match each stock to a CIK through its ticker (match = "ticker").
 
-    The SEC table only has today's tickers, so a match is checked later by verify_identity.
-    The dataset writes share classes as "LGF.B" and when-issued shares as "CARR#", while the SEC
-    writes "LGF-B" and "CARR".
-
-    Args:
-        meta: Table returned by load_metadata.
-        sec: Table returned by sec_ticker_table.
-
-    Returns:
-        One row per stock: ticker, security_name, cik (missing if no match), sec_name and match.
+    The dataset writes "LGF.B" and "CARR#" where the SEC writes "LGF-B" and "CARR".
     """
     stocks = meta.loc[~meta["is_etf"], ["ticker", "security_name"]].copy()
     stocks["sec_ticker"] = stocks["ticker"].str.upper().str.replace(".", "-").str.rstrip("#")
@@ -125,43 +100,24 @@ def map_tickers(meta: pd.DataFrame, sec: pd.DataFrame) -> pd.DataFrame:
 
 
 def sec_name_table(path: Path = EDGAR_DIR / "cik-lookup-data.txt") -> pd.DataFrame:
-    """Every company name ever registered on EDGAR, with its CIK (about one million names).
-
-    The file is downloaded once. Each line reads "NAME:CIK:".
-
-    Returns:
-        Columns sec_name, cik and key (the normalised name).
-    """
+    """All company names registered on EDGAR, with their CIK (downloaded once)."""
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         with urlopen(Request(NAMES_URL, headers=sec_headers()), timeout=300) as response:
             path.write_bytes(response.read())
-    rows = []
-    for line in path.read_text(encoding="latin-1").splitlines():
-        if line.endswith(":") and line.count(":") >= 2:
-            name, cik, _ = line.rsplit(":", 2)
-            if name != "" and cik.isdigit():
-                rows.append((name, int(cik)))
-    names = pd.DataFrame(rows, columns=["sec_name", "cik"])
+    lines = pd.Series(path.read_text(encoding="latin-1").splitlines())
+    names = lines.str.extract(r"^(?P<sec_name>.+):(?P<cik>\d+):$").dropna()
+    names["cik"] = names["cik"].astype(int)
     names["key"] = names["sec_name"].map(normalise_name)
     names = names[names["key"] != ""]
     return names.drop_duplicates(["key", "cik"])
 
 
 def map_names(mapping: pd.DataFrame, names: pd.DataFrame, max_candidates: int = 3) -> pd.DataFrame:
-    """Match the stocks that map_tickers could not match, through their company name.
+    """Match the stocks without a CIK through their company name (match = "name").
 
-    These are mostly companies acquired, bankrupt or renamed since 2020: their ticker is no
-    longer in the SEC table, but their name is still on EDGAR. If a name has several CIKs, we keep
-    them all (up to max_candidates) and verify_identity picks one.
-
-    Args:
-        mapping: Table returned by map_tickers.
-        names: Table returned by sec_name_table.
-        max_candidates: Maximum number of CIKs for one name.
-
-    Returns:
-        The mapping with the name matches added (match = "name"). A ticker can have several rows.
+    These are mostly firms delisted or renamed since 2020. A name can give up to max_candidates CIKs;
+    verify_identity keeps one.
     """
     missing = mapping[mapping["cik"].isna()].drop(columns=["cik", "sec_name", "match"])
     missing["key"] = missing["security_name"].map(normalise_name)
@@ -181,18 +137,7 @@ def read_filings(block: dict) -> pd.DataFrame:
 
 
 def fetch_issuer(cik: int, start: str, end: str) -> tuple[dict, pd.DataFrame]:
-    """Download the filing history of one company and keep its 8-Ks between start and end.
-
-    The SEC gives the most recent filings in the main file and older ones in extra pages.
-
-    Args:
-        cik: SEC identifier of the company.
-        start: First filing date kept (YYYY-MM-DD).
-        end: Last filing date kept (YYYY-MM-DD).
-
-    Returns:
-        A dictionary with facts about the company, and one row per 8-K or 8-K/A.
-    """
+    """Facts about one company and its 8-Ks between start and end (older filings are in extra pages)."""
     root = get_json(f"{SUBMISSIONS_URL}CIK{int(cik):010d}.json")
     frames = [read_filings(root["filings"]["recent"])]
     for page in root["filings"].get("files", []):
@@ -205,9 +150,7 @@ def fetch_issuer(cik: int, start: str, end: str) -> tuple[dict, pd.DataFrame]:
         "cik": int(cik),
         "sec_name": root.get("name"),
         "former_names": "|".join(f["name"] for f in root.get("formerNames", [])),
-        "entity_type": root.get("entityType"),
         "first_filing": filings["filingDate"].min(),
-        "n_filings_period": len(in_period),
         "n_8k_period": int((in_period["form"] == "8-K").sum()),
         "foreign_filer": bool(in_period["form"].isin(FOREIGN_FORMS).any()),
     }
@@ -217,11 +160,7 @@ def fetch_issuer(cik: int, start: str, end: str) -> tuple[dict, pd.DataFrame]:
 
 
 def download_issuer(cik: int, start: str, end: str, cache: Path) -> dict:
-    """Download one company into the cache folder, unless it is already there.
-
-    Returns:
-        The company facts with status "ok", or status "failed: <error>" if the download failed.
-    """
+    """Download one company into the cache, unless it is already there."""
     issuer_path = cache / f"{cik}.json"
     if not issuer_path.exists():
         try:
@@ -236,18 +175,9 @@ def download_issuer(cik: int, start: str, end: str, cache: Path) -> dict:
 
 
 def collect_filings(ciks: list[int], start: str, end: str, out_dir: Path = EDGAR_DIR, workers: int = 4):
-    """Download the 8-Ks of every company and save them in two Parquet files.
+    """Download the 8-Ks of all companies into issuers.parquet and filings_8k.parquet.
 
-    Each company is saved in out_dir/cache as soon as it is downloaded, so a run that stops can
-    be restarted. Downloads run in a few threads; get_json keeps the total rate under the SEC limit.
-    Writes out_dir/issuers.parquet (one row per company) and out_dir/filings_8k.parquet (one row per filing).
-
-    Args:
-        ciks: CIKs to download.
-        start: First filing date kept (YYYY-MM-DD).
-        end: Last filing date kept (YYYY-MM-DD).
-        out_dir: Output folder.
-        workers: Number of downloads in parallel.
+    Each company is cached as soon as it is downloaded, so a stopped run can be restarted.
     """
     cache = out_dir / "cache"
     cache.mkdir(parents=True, exist_ok=True)
@@ -259,30 +189,19 @@ def collect_filings(ciks: list[int], start: str, end: str, out_dir: Path = EDGAR
     ok = issuers.loc[issuers["status"] == "ok", "cik"]
     filings = pd.concat([pd.read_parquet(cache / f"{cik}.parquet") for cik in ok], ignore_index=True)
     filings.to_parquet(out_dir / "filings_8k.parquet", index=False)
-    print(f"{len(ok)} of {len(ciks)} companies downloaded")
 
 
 def verify_identity(mapping: pd.DataFrame, issuers: pd.DataFrame, threshold: float = 0.6) -> pd.DataFrame:
-    """Check that each matched CIK is really the company of the dataset.
+    """Give each ticker one CIK and a status.
 
-    A ticker can be reused by another company after 2020, so we compare the security name of the
-    dataset with the current and former SEC names of the company and keep the best score.
-    Each ticker then gets a status, in this order of priority:
-    unmatched, download_failed, name_mismatch, foreign_filer (files 6-Ks, not 8-Ks), no_8k, verified.
-    When a ticker has several candidate CIKs, we keep a verified one with the most 8-Ks.
-
-    Args:
-        mapping: Table returned by map_names.
-        issuers: issuers.parquet written by collect_filings.
-        threshold: Minimum name similarity.
-
-    Returns:
-        One row per ticker, with the company facts, name_score and status.
+    The name of the dataset is compared with the current and former SEC names (a ticker can be reused).
+    Status, by priority: unmatched, download_failed, name_mismatch, foreign_filer, no_8k, verified.
+    Among several CIKs we keep a verified one with the most 8-Ks.
     """
     out = mapping.merge(issuers.drop(columns="sec_name"), on="cik", how="left")
     scores = []
     for row in out.itertuples():
-        if not isinstance(row.sec_name, str):  # no SEC company for this ticker
+        if not isinstance(row.sec_name, str):
             scores.append(0.0)
             continue
         candidates = [row.sec_name] + [name for name in row.former_names.split("|") if name]
@@ -304,29 +223,21 @@ def verify_identity(mapping: pd.DataFrame, issuers: pd.DataFrame, threshold: flo
 
 
 def load_filings(out_dir: Path = EDGAR_DIR) -> pd.DataFrame:
-    """Load the 8-K filings with their acceptance time.
+    """8-K filings with their acceptance time in UTC and in New York.
 
-    acceptanceDateTime is in UTC: an Apple earnings 8-K reads 20:30 in summer and 21:30 in winter,
-    which is 16:30 in New York. Before 2002 EDGAR only kept the date, and the time then reads
-    00:00:00 in New York: we mark these filings with time_known = False.
-    Earnings announcements are item 2.02 (item 12 in 2003-2004).
-
-    Returns:
-        One row per filing: cik, accession, form, filing_date, accepted (UTC), accepted_ny,
-        time_known, items and earnings.
+    Before 2002 EDGAR only kept the date and the time reads midnight in New York: time_known = False.
+    Earnings are item 2.02 (item 12 in 2003-2004).
     """
     raw = pd.read_parquet(out_dir / "filings_8k.parquet")
     filings = pd.DataFrame({
         "cik": raw["cik"].astype("int64"),
-        "accession": raw["accessionNumber"],
         "form": raw["form"],
         "filing_date": pd.to_datetime(raw["filingDate"]),
         "accepted": pd.to_datetime(raw["acceptanceDateTime"], utc=True, errors="coerce"),
-        "items": raw["items"].fillna("").astype(str),
     })
     filings["accepted_ny"] = filings["accepted"].dt.tz_convert("America/New_York")
     midnight = filings["accepted_ny"].dt.strftime("%H:%M:%S") == "00:00:00"
     filings["time_known"] = filings["accepted"].notna() & ~midnight
-    item_lists = filings["items"].str.split(",")
-    filings["earnings"] = item_lists.apply(lambda items: "2.02" in items or "12" in items)
+    items = raw["items"].fillna("").astype(str).str.split(",")
+    filings["earnings"] = items.apply(lambda codes: "2.02" in codes or "12" in codes)
     return filings

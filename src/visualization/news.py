@@ -5,14 +5,7 @@ from src.visualization.plots import BUY_HOLD, DAY, NIGHT
 
 
 def plot_filing_times(profile: pd.DataFrame) -> plt.Figure:
-    """Figure N1: time of the day at which 8-Ks are filed (New York time).
-
-    Args:
-        profile: Table returned by filing_time_profile.
-
-    Returns:
-        The figure.
-    """
+    """Figure N1: time of the day at which 8-Ks are filed (New York time)."""
     fig, ax = plt.subplots()
     ax.axvspan(9.5, 16, color=DAY, alpha=0.12, label="Trading session (9:30–16:00)")
     slots = profile.index
@@ -25,15 +18,7 @@ def plot_filing_times(profile: pd.DataFrame) -> plt.Figure:
 
 
 def plot_news_wealth(paths: pd.DataFrame, title: str) -> plt.Figure:
-    """Figure N2: value of $1 invested overnight only or intraday only, all and quiet stock-days.
-
-    Args:
-        paths: Table returned by news_paths.
-        title: Figure title.
-
-    Returns:
-        The figure.
-    """
+    """Figure N2: value of $1 invested overnight only or intraday only, all and quiet stock-days."""
     fig, ax = plt.subplots()
     all_days = paths[paths["group"] == "all"]
     quiet = paths[paths["group"] == "quiet"]
@@ -47,14 +32,7 @@ def plot_news_wealth(paths: pd.DataFrame, title: str) -> plt.Figure:
 
 
 def plot_gap_tests(tests: pd.DataFrame) -> plt.Figure:
-    """Figure N3: night − day gap and its 95 % CI (clustered by date) for each news portfolio.
-
-    Args:
-        tests: Table returned by quiet_gap_tests.
-
-    Returns:
-        The figure.
-    """
+    """Figure N3: night − day gap and its 95 % CI (clustered by date) for each news portfolio."""
     fig, ax = plt.subplots(figsize=(8, 3.2))
     y = list(range(len(tests)))[::-1]
     gap = tests["gap annualised (%)"]
@@ -68,14 +46,7 @@ def plot_gap_tests(tests: pd.DataFrame) -> plt.Figure:
 
 
 def plot_macro_paths(paths: dict[str, pd.DataFrame]) -> plt.Figure:
-    """Figure N4: value of $1 overnight on all nights, overnight without jobs / CPI nights, and intraday.
-
-    Args:
-        paths: Panel title -> table returned by macro_paths.
-
-    Returns:
-        The figure.
-    """
+    """Figure N4: value of $1 overnight on all nights, overnight without jobs / CPI nights, and intraday."""
     fig, axes = plt.subplots(1, len(paths), sharey=True, figsize=(5.5 * len(paths), 4.5), squeeze=False)
     for ax, (name, p) in zip(axes[0], paths.items()):
         ax.plot(p["date"], p["night"], color=NIGHT, label="Overnight, all nights")

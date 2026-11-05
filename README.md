@@ -93,7 +93,7 @@ Each member keeps their part and carries out its P3 next steps, detailed at the 
 ## Quickstart
 
 1. Python 3.10 or newer, then `pip install -r requirements.txt`.
-2. Part IV needs two environment variables, not a `.env` file: `FRED_API_KEY` (free FRED key) and `SEC_USER_AGENT` (your name and email).
+2. Part IV needs the SEC filings, which the SEC only serves to users who give a name and an email: set `SEC_USER_AGENT` (no key or account needed).
 3. Run `results.ipynb` from the top. The first cells download the Kaggle files (about 520 MB) and build the price table.
 4. Before the news section, from the repository root:
 
@@ -101,4 +101,4 @@ Each member keeps their part and carries out its P3 next steps, detailed at the 
 SEC_USER_AGENT="Your Name your.email@epfl.ch" python -m scripts.collect_news
 ```
 
-About 20 minutes. The files land in `data/edgar/`. Set `FRED_API_KEY` before the macro cells.
+About 20 minutes. The files land in `data/edgar/`. The macro release dates are already in `data/macro/`.

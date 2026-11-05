@@ -9,19 +9,7 @@ EVENTS = ["jobs report", "CPI", "FOMC"]
 
 
 def place_events(events: pd.DataFrame, windows: pd.DataFrame) -> pd.DataFrame:
-    """Put each macroeconomic release in the night or in the trading day of a session.
-
-    We use the same rule as for 8-Ks (assign_sessions). An 8:30 release is in the night of that
-    day's session, or of the next session if the market is closed (for example a jobs report on
-    Good Friday). An FOMC statement at 14:00 is in the day of its session.
-
-    Args:
-        events: Tables returned by bls_release_dates and fomc_dates, concatenated.
-        windows: Table returned by session_windows.
-
-    Returns:
-        One row per release: event, release, date (session) and timing ("night" or "day").
-    """
+    """Put each macro release in the night or the day of a session, as for the 8-Ks."""
     releases = pd.DataFrame({
         "event": events["event"].to_numpy(),
         "accepted": events["release"].dt.tz_convert("UTC").to_numpy(),
@@ -33,12 +21,7 @@ def place_events(events: pd.DataFrame, windows: pd.DataFrame) -> pd.DataFrame:
 
 
 def macro_flags(placed: pd.DataFrame, windows: pd.DataFrame) -> pd.DataFrame:
-    """One row per session, saying which releases fall in its night or its day.
-
-    Returns:
-        Columns date, "jobs report night", "CPI night", "FOMC day", "BLS night" (jobs report or CPI)
-        and "macro" (any of the three).
-    """
+    """Flags per session: "jobs report night", "CPI night", "FOMC day", "BLS night" and "macro" (any)."""
     flags = pd.DataFrame({"date": windows["date"]})
     for event, timing in [("jobs report", "night"), ("CPI", "night"), ("FOMC", "day")]:
         dates = placed.loc[(placed["event"] == event) & (placed["timing"] == timing), "date"]
@@ -49,25 +32,15 @@ def macro_flags(placed: pd.DataFrame, windows: pd.DataFrame) -> pd.DataFrame:
 
 
 def event_counts(placed: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
-    """Number of releases of each kind in the night and in the day, between start and end."""
+    """Number of releases of each kind in the night and in the day."""
     placed = placed[placed["date"].between(start, end)]
     return pd.crosstab(placed["event"], placed["timing"]).reindex(EVENTS).fillna(0).astype(int)
 
 
 def macro_regression(daily: pd.DataFrame, flags: pd.DataFrame, maxlags: int = 5) -> pd.DataFrame:
-    """Do release sessions earn more than the other sessions?
+    """Extra return of release sessions, in bp, with HAC errors (5 lags, as in Part III).
 
-    Overnight return on jobs-report and CPI nights, and intraday return on FOMC days:
-    r_t = a + b * release_t + e_t, in bp, with HAC standard errors (5 lags).
-    The constant a is the mean of the other sessions, b the extra return of a release session.
-
-    Args:
-        daily: Daily portfolio with date, r_night and r_day.
-        flags: Table returned by macro_flags.
-        maxlags: Number of lags of the HAC standard errors.
-
-    Returns:
-        One row per (half, regressor): coefficient (bp), 95 % CI, p-value and number of sessions.
+    Overnight return on jobs report and CPI nights, intraday return on FOMC days.
     """
     data = daily.merge(flags, on="date")
     models = {"night": ["jobs report night", "CPI night"], "day": ["FOMC day"]}
@@ -91,13 +64,21 @@ def macro_regression(daily: pd.DataFrame, flags: pd.DataFrame, maxlags: int = 5)
     return pd.DataFrame(rows).set_index(["half", "regressor"]).round(3)
 
 
-def macro_decomposition(daily: pd.DataFrame, flags: pd.DataFrame) -> pd.DataFrame:
-    """Share of the summed overnight log return earned on nights with a jobs report or a CPI release.
+def macro_regression_table(portfolios: dict[str, pd.DataFrame], flags: pd.DataFrame) -> pd.DataFrame:
+    """Extra return (bp) and p-value of each release, one row per portfolio."""
+    rows = {}
+    for name, daily in portfolios.items():
+        reg = macro_regression(daily, flags)
+        rows[name] = {}
+        for half, release in [("night", "jobs report night"), ("night", "CPI night"), ("day", "FOMC day")]:
+            rows[name][(release, "bp")] = reg.loc[(half, release), "coef (bp)"]
+            rows[name][(release, "p")] = reg.loc[(half, release), "p-value"]
+        rows[name][("other days", "bp")] = reg.loc[("day", "other sessions (mean)"), "coef (bp)"]
+    return pd.DataFrame.from_dict(rows, orient="index").round(3)
 
-    Returns:
-        One row for release nights and one for the other nights: nights, share of nights (%),
-        mean (bp) and share of the summed log return (%).
-    """
+
+def macro_decomposition(daily: pd.DataFrame, flags: pd.DataFrame) -> pd.DataFrame:
+    """Share of the summed overnight log return earned on jobs report and CPI nights."""
     data = daily.merge(flags, on="date").dropna(subset=["r_night"])
     r_night = data["r_night"].astype(float)
     log_night = np.log1p(r_night)
@@ -114,14 +95,7 @@ def macro_decomposition(daily: pd.DataFrame, flags: pd.DataFrame) -> pd.DataFram
 
 
 def macro_free_gap(portfolios: dict[str, pd.DataFrame], flags: pd.DataFrame) -> pd.DataFrame:
-    """Night - day gap of each portfolio with and without the sessions that have a release.
-
-    A session is dropped (night and day) when a jobs report, a CPI release or an FOMC statement
-    falls in it. Same regression as Part II.
-
-    Returns:
-        One row per (portfolio, sample): gap (%), CI, p-value and number of dates.
-    """
+    """Night - day gap with all sessions and without the sessions that have a release."""
     no_release = flags.loc[~flags["macro"], "date"]
     rows = {}
     for name, daily in portfolios.items():
@@ -131,10 +105,7 @@ def macro_free_gap(portfolios: dict[str, pd.DataFrame], flags: pd.DataFrame) -> 
 
 
 def macro_paths(daily: pd.DataFrame, flags: pd.DataFrame) -> pd.DataFrame:
-    """Value of $1 invested overnight on all nights, overnight without release nights, and intraday.
-
-    On a skipped night the investor stays in cash.
-    """
+    """Value of $1 overnight, overnight in cash on release nights, and intraday."""
     data = daily.merge(flags[["date", "BLS night"]], on="date").dropna(subset=["r_night", "r_day"])
     night_without_releases = data["r_night"].where(~data["BLS night"], 0)
     return pd.DataFrame({

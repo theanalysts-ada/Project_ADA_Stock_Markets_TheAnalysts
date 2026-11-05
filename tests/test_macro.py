@@ -21,9 +21,9 @@ def test_parse_fomc_headers():
 def test_releases_are_placed_in_the_right_half():
     windows = session_windows("2015-03-25", "2015-04-15")
     events = pd.DataFrame([
-        make_event("jobs report", "2015-04-03", "08:30"),  # Good Friday: market closed
+        make_event("jobs report", "2015-04-03", "08:30"),
         make_event("CPI", "2015-04-14", "08:30"),
-        make_event("FOMC", "2015-03-18", "14:00"),  # outside the calendar: dropped
+        make_event("FOMC", "2015-03-18", "14:00"),
         make_event("FOMC", "2015-04-14", "14:00"),
     ])
     placed = place_events(events, windows)
