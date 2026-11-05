@@ -1,12 +1,26 @@
+# Who Makes Money While Wall Street Sleeps?
+
+## Abstract
+
+Buy an S&P 500 fund at every close and sell it at the next open: from 1998 to 2020, one dollar becomes $4.74. Buy at every open and sell at the close instead, and you have 80 cents. So the profit is made at night, while Wall Street sleeps. Who is behind it? Using US stock prices, we test three suspects. Risk: no sign that longer nights pay more. News: without news, the night-day gap only falls from 7.6 % to 6.2 % a year. The crowd, people who rush into stocks that get attention, still looks plausible, but attention often comes with news, so it is hard to see if the crowd alone raises night returns. We use an experiment: people who buy the wrong stock because its ticker looks like a famous one give attention without news. A first test on one case shows no clear effect.
+
+## Research Questions
+
+1. **Crime:** do overnight returns exceed intraday returns across US stocks and ETFs, and does the gap survive data cleaning and statistical tests?
+2. **Risk:** do longer closures (weekends, holidays) earn higher overnight returns?
+3. **News:** are 8-K announcements concentrated after the close, and do nights without news still earn more?
+4. **Crowd:** after a spike of attention, do we see an overnight gain followed by an intraday loss?
+5. **Proof:** when a famous company has a spike of attention, does a stock that investors mistake for it gain more than usual overnight, compared with placebo stocks?
+
 ## Proposed additional datasets
 
 ### SEC EDGAR 8-K filings (Part IV)
 
-Listed US firms must file an **8-K** within four business days of any important event; **Item 2.02** marks earnings announcements. `scripts/collect_news.py` links stocks to their SEC identifier (CIK), also by name for firms renamed or delisted since 2020: **4,197 stocks** (75.9 % of rows) are matched. Filing times exist from 2003, and the **557,104** 8-Ks since then are placed in a night or a session. Foreign firms file 6-Ks and are excluded.
+Listed US firms must file an **8-K** within four business days of any important event; **Item 2.02** marks earnings announcements. `scripts/collect_news.py` links stocks to their SEC identifier (CIK): **4,197 stocks** (75.9 % of rows) are matched. Filing times exist from 2003, and the **557,104** 8-Ks since then are placed in a night or a session. Foreign firms file 6-Ks and are excluded.
 
 ### Macroeconomic calendar (Part IV)
 
-On SPY, firm news averages out, so we add the **jobs report** and the **CPI** (8:30, during the night; FRED API) and **FOMC** statements (14:00, during the session; Federal Reserve website): **267, 267 and 177** releases from 1998 to 2020. PPI, retail sales and GDP follow in P3.
+On SPY, firm news averages out, so we add the **jobs report** and the **CPI** (FRED API) and **FOMC** statements (Federal Reserve website): **267, 267 and 177** releases from 1998 to 2020. PPI, retail sales and GDP follow in P3.
 
 ### NYSE trading calendar (Part III)
 
@@ -14,13 +28,13 @@ On SPY, firm news averages out, so we add the **jobs report** and the **CPI** (8
 
 ### Google Trends (Part V, for P3)
 
-Tested with the unofficial `pytrends` on ten large companies over January–March 2020: "*X* stock" tracks interest in the stock better than the company name, daily data come only in short windows rescaled from 0 to 100. We go ahead in a limited way: daily windows around volume spikes for about 30 large companies, with abnormal volume as fallback.
+Tested with the unofficial `pytrends` on ten large companies (January–March 2020): "*X* stock" tracks interest in the stock better than the company name, but daily data come only in short windows. We go ahead in a limited way, for about 30 large companies, with abnormal volume as fallback.
 
 ## Methods
 
 ### Data handling (Part I)
 
-Kaggle daily prices of **8,049** Nasdaq-traded stocks and ETFs (1962 to 2020, **28 million rows**), stored as typed Parquet (0.70 GB instead of 2.75 GB, loaded in about 1 second). Prices are adjusted for dividends, and each day is split into an **overnight** (close to open) and an **intraday** (open to close) return. From **1998**, the first year without missing opens, a **liquidity filter** uses previous-day values only (close of at least \$5, dollar volume above the bottom 20 % of its year). Foreign, leveraged and inverse ETFs are excluded.
+Kaggle daily prices of **8,049** Nasdaq-traded stocks and ETFs (1962 to 2020, **28 million rows**), stored as typed Parquet. Prices are adjusted for dividends, and each day is split into an **overnight** (close to open) and an **intraday** (open to close) return. From **1998**, the first year without missing opens, a **liquidity filter** uses previous-day values only (close of at least \$5, dollar volume above the bottom 20 % of its year). Foreign, leveraged and inverse ETFs are excluded.
 
 ### The crime (Part II)
 
@@ -32,7 +46,7 @@ We test two predictions: a return **per hour** (a weekend earning 3.7 times a we
 
 ### News (Part IV)
 
-Press releases often come before the 8-K, so we test whether the gap survives on **quiet stock-days**, with no filing within two sessions. A stock-level regression with **date fixed effects** measures an 8-K's effect on the overnight return and its size; macro release days use **HAC standard errors** (robust to unequal variances and autocorrelation).
+Press releases often come before the 8-K, so we test whether the gap survives on **quiet stock-days**, with no filing within two sessions. A stock-level regression with **date fixed effects** measures an 8-K's effect on the overnight return and its size; macro release days use **HAC standard errors**.
 
 ### Crowd (Part V)
 
@@ -51,6 +65,15 @@ A stock mistaken for a famous company has no news of its own, so an overnight ga
 - *Associations, not causes:* firms choose when to file and volume spikes often come with news, so Parts IV and V show links, not causes; the proof, meant to isolate a cause, rests on a single case (34 events).
 
 
+## Proposed timeline
+
+- **Until the P2 feedback:** we wait for the review of Milestone P2.
+- **After the feedback:** each member adapts their part to the TA's feedback, then works on it (see the next section) and fills in the final notebook.
+- **11 December:** office hour with the TA, to check our progress and ask our questions.
+- **After 11 December:** last organisation and code clean-up.
+- **By Friday 18 December:** final submission of Milestone P3.
+
+
 ## Questions for TAs
  
 1. Foreign firms earn a night–day gap of 20.9 % a year, against 3.5 % for US firms under the same ticker (Part IV), and their US night overlaps their home session. Should we drop them from every chapter, or report results with and without them?
@@ -61,8 +84,8 @@ A stock mistaken for a famous company has no news of its own, so an overnight ga
 ## Quickstart
 
 1. Python 3.10 or newer, then `pip install -r requirements.txt`.
-2. Part IV needs two environment variables, not a `.env` file: `FRED_API_KEY` (free FRED key) and `SEC_USER_AGENT` (your name and email). The price download does not read a key in our code.
-3. Run `results.ipynb` from the top. The first cells download the Kaggle files (about 520 MB) and build the price table (1–2 minutes the first time).
+2. Part IV needs two environment variables, not a `.env` file: `FRED_API_KEY` (free FRED key) and `SEC_USER_AGENT` (your name and email).
+3. Run `results.ipynb` from the top. The first cells download the Kaggle files (about 520 MB) and build the price table.
 4. Before the news section, from the repository root:
 
 ```bash
