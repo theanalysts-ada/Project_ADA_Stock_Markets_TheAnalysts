@@ -5,7 +5,7 @@ import statsmodels.api as sm
 from src.analysis.crime import block_bootstrap_ci, night_indicator_regression
 from src.config import STUDY_START_YEAR
 from src.features.calendar import build_night_calendar
-from src.features.returns import TRADING_DAYS_PER_YEAR, cumulative_wealth
+from src.features.returns import cumulative_wealth
 
 # Filing times exist from 2003.
 TIMED_START_YEAR = 2003
@@ -235,17 +235,6 @@ def quiet_gap_tests(portfolios: dict[str, pd.DataFrame]) -> pd.DataFrame:
     return pd.DataFrame.from_dict(rows, orient="index").round(3)
 
 
-def quiet_gap_by_period(portfolios: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Night - day gap of the all and quiet portfolios in 1998-2002, 2003-2007 and 2008-2020."""
-    rows = {}
-    for first, last in [(1998, 2002), (2003, 2007), (2008, 2020)]:
-        for name in ["all", "quiet"]:
-            daily = portfolios[name]
-            in_period = daily["date"].dt.year.between(first, last)
-            rows[(f"{first}–{last}", name)] = gap_test(daily[in_period])
-    return pd.DataFrame.from_dict(rows, orient="index").rename_axis(["period", "group"]).round(3)
-
-
 def timing_validation(panel: pd.DataFrame) -> pd.DataFrame:
     """Mean absolute night and day returns with no 8-K, a night 8-K or a day 8-K (from 2003)."""
     days = panel[panel["timed"]].dropna(subset=["r_night", "r_day"])
@@ -294,18 +283,6 @@ def news_regression(panel: pd.DataFrame) -> pd.DataFrame:
                 "observations": int(fit.nobs),
             })
     return pd.DataFrame(rows).set_index(["outcome", "regressor"]).round(3)
-
-
-def annualised_means(portfolios: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Annualised mean overnight and intraday returns (%) of each news portfolio."""
-    rows = {}
-    for name, daily in portfolios.items():
-        rows[name] = {
-            "night (%)": 100 * TRADING_DAYS_PER_YEAR * daily["r_night"].mean(),
-            "day (%)": 100 * TRADING_DAYS_PER_YEAR * daily["r_day"].mean(),
-            "mean stocks per date": daily["n"].mean(),
-        }
-    return pd.DataFrame.from_dict(rows, orient="index").round(2)
 
 
 def gap_by_issuer_group(stocks: pd.DataFrame, identity: pd.DataFrame) -> pd.DataFrame:
