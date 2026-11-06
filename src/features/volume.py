@@ -1,26 +1,30 @@
+import numpy as np
 import pandas as pd
 
 
-def abnormal_volume(df: pd.DataFrame, window: int = 20, threshold: float = 3.0) -> pd.DataFrame:
-    """Add abnormal volume and attention-spike flags, computed within each ticker.
-
-    abn_volume(t) = volume(t) / mean(volume over the previous `window` rows of the ticker).
-    Today is excluded from the mean, so a spike does not inflate its own baseline.
-    The first `window` rows of each ticker, and days whose baseline is zero, get NaN.
+def abnormal_volume(df, window=20, threshold=3.0):
+    """Each day's volume divided by the average volume of the previous days, for each ticker.
 
     Args:
-        df: Table from load_prices, with ticker, date and volume.
-        window: Number of previous trading days in the baseline.
-        threshold: A day is a spike when abn_volume is strictly above this value.
+        df: Prices with ticker, date and volume.
+        window: Number of previous days in the average.
+        threshold: Above this ratio, the day is a spike.
 
     Returns:
-        The table sorted by ticker and date, with abn_volume (float64) and spike (bool) added.
+        df with two new columns: abn_volume (the ratio) and spike (True or False).
     """
     df = df.sort_values(["ticker", "date"]).reset_index(drop=True)
-    volume = df["volume"].astype("float64")
-    prev = volume.groupby(df["ticker"], observed=True).shift(1)
-    baseline = prev.groupby(df["ticker"], observed=True).transform(
-        lambda s: s.rolling(window, min_periods=window).mean()
-    )
-    ratio = (volume / baseline).where(baseline > 0)
-    return df.assign(abn_volume=ratio, spike=ratio.gt(threshold))
+    volume = df["volume"].astype(float)
+
+    def mean_of_previous_days(v):
+        # shift(1): each day looks at the day before, so today is not in its own average
+        return v.shift(1).rolling(window).mean()
+
+    # Average of the previous days, computed separately for each ticker
+    baseline = volume.groupby(df["ticker"], observed=True).transform(mean_of_previous_days)
+
+    df["abn_volume"] = volume / baseline
+    # If the average is 0, we would divide by zero: no value
+    df.loc[baseline == 0, "abn_volume"] = np.nan
+    df["spike"] = df["abn_volume"] > threshold
+    return df
