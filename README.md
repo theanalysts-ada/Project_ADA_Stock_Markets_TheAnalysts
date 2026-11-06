@@ -86,4 +86,4 @@ Each member carries out the P3 next steps of their part (see the notebook):
 ## Questions for TAs
 
 1. Foreign firms earn 20.9 % a year against 3.5 % for US firms (Part IV), but their US night overlaps their home session. Should we drop them everywhere?
-2. Given these limitations, some suspects may stay unresolved. Should we seek other evidence, or deepen our analyses?
+2. Given these limitations, some suspects may stay unresolved. Should we seek other suspects, or deepen our analyses?
