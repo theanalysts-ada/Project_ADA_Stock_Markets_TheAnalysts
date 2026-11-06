@@ -7,14 +7,19 @@ from src.config import STUDY_START_YEAR
 from src.features.calendar import build_night_calendar
 from src.features.returns import cumulative_wealth
 
+# Return units: x100 for %, x10000 for bp; rounding only controls displayed precision.
+
 # Filing times exist from 2003.
 TIMED_START_YEAR = 2003
+# Exclude filings within two sessions on either side: allow for delayed 8-K reporting.
 QUIET_WINDOW = 2
+# Keep coverage tables in the same order, from verified to unavailable identities.
 STATUS_ORDER = ["verified", "unmatched", "name_mismatch", "foreign_filer", "no_8k", "download_failed"]
 
 
 def session_windows(start_date: str, end_date: str) -> pd.DataFrame:
     """NYSE sessions with previous_close, market_open, market_close (UTC) and i (session number)."""
+    # 15 extra calendar days supply a following session to recover the last close.
     end = pd.Timestamp(end_date) + pd.Timedelta(days=15)
     cal = build_night_calendar(start_date, end.strftime("%Y-%m-%d"))
     cal = cal[["date", "previous_close", "market_open"]].copy()
@@ -65,6 +70,7 @@ def filing_time_profile(assigned: pd.DataFrame) -> pd.DataFrame:
     keep = (assigned["form"] == "8-K") & assigned["time_known"] & (assigned["date"].dt.year >= TIMED_START_YEAR)
     eight_k = assigned[keep]
     time = eight_k["accepted_ny"]
+    # 30-minute bins: two slots per hour over the 24-hour clock.
     slot = time.dt.hour + (time.dt.minute // 30) / 2
     kind = eight_k["earnings"].map({True: "earnings", False: "other 8-K"})
     counts = pd.crosstab(slot, kind)

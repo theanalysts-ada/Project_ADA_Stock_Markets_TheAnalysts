@@ -18,8 +18,11 @@ NAMES_URL = "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/"
 
 # SEC limit: 10 requests per second.
+# 0.12 seconds leaves a margin below the stated 10-requests/second limit.
 MIN_INTERVAL = 0.12
+# Foreign-issuer reports identify firms outside the domestic 8-K comparison.
 FOREIGN_FORMS = ["6-K", "20-F", "40-F"]
+# Remove legal/security terms so name comparisons focus on company identity.
 NAME_STOPWORDS = [
     "inc", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "lp", "llc", "sa", "nv", "ag",
     "holdings", "holding", "group", "the", "class", "common", "stock", "shares", "ordinary", "of", "and",
@@ -35,6 +38,7 @@ def sec_headers() -> dict:
     return {"User-Agent": os.environ["SEC_USER_AGENT"]}
 
 
+# At most five attempts tolerate temporary failures without retrying forever.
 def get_json(url: str, retries: int = 5) -> dict:
     """Download a JSON file from the SEC, at most 10 requests per second, with retries."""
     global _last_request
@@ -45,11 +49,13 @@ def get_json(url: str, retries: int = 5) -> dict:
                 time.sleep(wait)
             _last_request = time.monotonic()
         try:
+            # 60-second timeout prevents a stalled request from blocking collection indefinitely.
             with urlopen(Request(url, headers=sec_headers()), timeout=60) as response:
                 return json.loads(response.read())
         except Exception:
             if attempt == retries - 1:
                 raise
+            # Exponential backoff: wait 1, 2, 4... seconds between failed attempts.
             time.sleep(2 ** attempt)
 
 
@@ -103,6 +109,7 @@ def sec_name_table(path: Path = EDGAR_DIR / "cik-lookup-data.txt") -> pd.DataFra
     """All company names registered on EDGAR, with their CIK (downloaded once)."""
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Allow five minutes for the larger company-name archive.
         with urlopen(Request(NAMES_URL, headers=sec_headers()), timeout=300) as response:
             path.write_bytes(response.read())
     lines = pd.Series(path.read_text(encoding="latin-1").splitlines())
@@ -113,6 +120,7 @@ def sec_name_table(path: Path = EDGAR_DIR / "cik-lookup-data.txt") -> pd.DataFra
     return names.drop_duplicates(["key", "cik"])
 
 
+# Keep at most three identities per name to limit ambiguous matches.
 def map_names(mapping: pd.DataFrame, names: pd.DataFrame, max_candidates: int = 3) -> pd.DataFrame:
     """Match the stocks without a CIK through their company name (match = "name").
 
@@ -138,6 +146,7 @@ def read_filings(block: dict) -> pd.DataFrame:
 
 def fetch_issuer(cik: int, start: str, end: str) -> tuple[dict, pd.DataFrame]:
     """Facts about one company and its 8-Ks between start and end (older filings are in extra pages)."""
+    # SEC submission filenames use ten-digit, zero-padded CIK identifiers.
     root = get_json(f"{SUBMISSIONS_URL}CIK{int(cik):010d}.json")
     frames = [read_filings(root["filings"]["recent"])]
     for page in root["filings"].get("files", []):
@@ -174,6 +183,7 @@ def download_issuer(cik: int, start: str, end: str, cache: Path) -> dict:
     return issuer
 
 
+# Four workers overlap downloads; the shared request limiter still applies.
 def collect_filings(ciks: list[int], start: str, end: str, out_dir: Path = EDGAR_DIR, workers: int = 4):
     """Download the 8-Ks of all companies into issuers.parquet and filings_8k.parquet.
 
@@ -191,6 +201,7 @@ def collect_filings(ciks: list[int], start: str, end: str, out_dir: Path = EDGAR
     filings.to_parquet(out_dir / "filings_8k.parquet", index=False)
 
 
+# 0.6 is a heuristic name-similarity cutoff, not a calibrated probability.
 def verify_identity(mapping: pd.DataFrame, issuers: pd.DataFrame, threshold: float = 0.6) -> pd.DataFrame:
     """Give each ticker one CIK and a status.
 

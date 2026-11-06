@@ -6,4 +6,5 @@ META_FILE = "symbols_valid_meta.csv"
 PRICES_FILE = "prices.parquet"
 DROPPED_FILE = "dropped_rows.parquet"
 
+# First year with no missing opening prices in this dataset.
 STUDY_START_YEAR = 1998

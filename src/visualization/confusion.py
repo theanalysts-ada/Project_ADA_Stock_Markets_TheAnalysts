@@ -4,6 +4,7 @@ import numpy as np
 from src.visualization.plots import BUY_HOLD, DAY, NIGHT, STOCK
 
 
+# Figure sizes, fonts, offsets and rounding below are display choices only.
 def plot_pairs_by_length(counts):
     """Bar chart of the number of one-letter pairs by length of the shorter ticker.
 
@@ -88,6 +89,7 @@ def plot_pair_density(case, buzz, receiver):
     fig, ax = plt.subplots(figsize=(7.5, 5.5))
 
     # Density map: the colour counts the days in each small hexagon
+    # 45 hexagons across give a readable density; log bins reveal sparse regions.
     cells = ax.hexbin(ratios[buzz], ratios[receiver], gridsize=45, xscale="log", yscale="log", bins="log",
                       cmap="Blues", mincnt=1, linewidths=0.2)
     fig.colorbar(cells, ax=ax, label="Number of days (log scale)")
@@ -96,6 +98,7 @@ def plot_pair_density(case, buzz, receiver):
     ax.scatter(spike_days[buzz], spike_days[receiver], s=26, color=DAY, edgecolor="black", lw=0.5,
                label=f"{len(spike_days)} spike days of {buzz}")
 
+    # Abnormal volume of 1 is the previous-window average, on either axis.
     ax.axhline(1, color="black", lw=0.8, ls="--")
     ax.axvline(1, color="black", lw=0.8, ls="--")
     ax.set_xlabel(buzz + ": abnormal volume")
@@ -127,6 +130,7 @@ def plot_placebo_scores(placebo_scores, score, p, title=None):
     scores = scores[~np.isnan(scores)] * 100
 
     fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    # 20 bins give a compact view of the default 100 placebo scores.
     ax.hist(scores, bins=20, color=BUY_HOLD, edgecolor="white", label="placebo companies")
 
     # If the real score is far to the right of the placebos, the effect is not due to chance

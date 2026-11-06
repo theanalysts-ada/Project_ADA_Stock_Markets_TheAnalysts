@@ -5,6 +5,7 @@
 from src.data.edgar import EDGAR_DIR, collect_filings, map_names, map_tickers, sec_name_table, sec_ticker_table
 from src.data.metadata import load_metadata
 
+# Pad the price sample (1998 to April 2020) to capture nearby filings.
 START, END = "1997-12-01", "2020-04-30"
 
 

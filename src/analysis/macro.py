@@ -5,6 +5,8 @@ import statsmodels.api as sm
 from src.analysis.news import assign_sessions, gap_test
 from src.features.returns import cumulative_wealth
 
+# Initial macro sample: employment, inflation and monetary-policy announcements.
+# Return units: x100 for %, x10000 for bp; rounding only controls displayed precision.
 EVENTS = ["jobs report", "CPI", "FOMC"]
 
 
@@ -37,6 +39,7 @@ def event_counts(placed: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     return pd.crosstab(placed["event"], placed["timing"]).reindex(EVENTS).fillna(0).astype(int)
 
 
+# Five HAC lags allow dependence over roughly one trading week; a modelling choice.
 def macro_regression(daily: pd.DataFrame, flags: pd.DataFrame, maxlags: int = 5) -> pd.DataFrame:
     """Extra return of release sessions, in bp, with HAC errors (5 lags, as in Part III).
 
@@ -64,6 +67,7 @@ def macro_regression(daily: pd.DataFrame, flags: pd.DataFrame, maxlags: int = 5)
     return pd.DataFrame(rows).set_index(["half", "regressor"]).round(3)
 
 
+# Five HAC lags allow dependence over roughly one trading week; a modelling choice.
 def macro_regression_table(portfolios: dict[str, pd.DataFrame], flags: pd.DataFrame) -> pd.DataFrame:
     """Extra return (bp) and p-value of each release, one row per portfolio."""
     rows = {}

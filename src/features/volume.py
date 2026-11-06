@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 
+# 20 sessions approximate a trading month; 3x is a heuristic attention-spike cutoff.
 def abnormal_volume(df, window=20, threshold=3.0):
     """Each day's volume divided by the average volume of the previous days, for each ticker.
 

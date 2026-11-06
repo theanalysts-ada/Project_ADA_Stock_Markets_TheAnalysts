@@ -5,7 +5,9 @@ from src.config import DATA_DIR, DROPPED_FILE, META_FILE, PRICES_FILE
 from src.data.clean import clean_prices
 from src.features.returns import add_adjusted_prices
 
+# Shared Parquet schema: raw prices for quality checks, adjusted prices for returns.
 COLUMNS = ["ticker", "date", "open", "close", "open_adj", "high_adj", "low_adj", "close_adj", "volume", "asset_type"]
+# Kaggle identifier of the project price dataset.
 DATASET = "jacksoncrow/stock-market-dataset"
 
 
@@ -64,6 +66,7 @@ def read_one_csv(path: Path, asset_type: str) -> pd.DataFrame:
     Returns:
         Table with lower-case columns plus ticker and asset_type.
     """
+    # float32 limits memory use; nullable Int64 preserves missing share counts.
     df = pd.read_csv(path, parse_dates=["Date"], dtype={"Volume": "Int64", "Open": "float32", "High": "float32", "Low": "float32", "Close": "float32", "Adj Close": "float32"})
     df["asset_type"] = asset_type
     df["ticker"] = path.stem

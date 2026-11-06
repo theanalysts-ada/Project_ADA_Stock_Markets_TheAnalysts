@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 from src.config import DATA_DIR, META_FILE
 
+# Decode the listing codes supplied in the Nasdaq metadata file.
 EXCHANGES = {"A": "NYSE American", "N": "NYSE", "P": "NYSE Arca", "Q": "Nasdaq", "Z": "Cboe BZX"}
 MARKET_CATEGORIES = {"Q": "Global Select", "G": "Global Market", "S": "Capital Market"}
 FINANCIAL_STATUS = {"N": "Normal", "D": "Deficient", "E": "Delinquent", "H": "Deficient and delinquent"}
@@ -44,12 +45,14 @@ def exchange_breakdown(meta: pd.DataFrame) -> pd.DataFrame:
     return table.loc[order].rename_axis(index="exchange", columns=None)
 
 
+# Heuristic name screen for ETFs exposed to markets outside the US.
 FOREIGN_KEYWORDS = (
     "japan", "europe", "eurozone", "emerging", "china", "chinese", "india", "brazil",
     "korea", "mexico", "australia", "hong kong", "taiwan", "russia", "latin", "eafe",
     "frontier", "international", "germany", "united kingdom", "britain", "asia",
     "pacific", "africa",
 )
+# Name markers for leveraged or inverse products with mechanical returns.
 LEVERAGED_KEYWORDS = (
     "ultrashort", "ultrapro", "ultra ", "inverse", " 2x", " 3x", "2x ", "3x ",
     "bear 1x", "bear 2x", "bear 3x", "bull 2x", "bull 3x", "leveraged", "proshares short",

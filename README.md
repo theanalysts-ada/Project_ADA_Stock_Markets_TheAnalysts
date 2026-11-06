@@ -88,14 +88,3 @@ Each member keeps their part and carries out its P3 next steps, detailed at the 
 
 1. Foreign firms earn a gap of 20.9 % a year, against 3.5 % for US firms under the same ticker (Part IV), and their US night overlaps their home session. Should we drop them from every part?
 2. For some suspects our data cannot give a clear verdict: risk is not measured directly, press articles are missing, and the proof has one case. Should we look for other evidence, or deepen the current analyses as planned?
-
-
-## Quickstart
-
-1. Python 3.10 or newer, then `pip install -r requirements.txt`.
-2. Run `results.ipynb` from the top. The first cells download the Kaggle files (about 520 MB) and build the price table.
-3. The SEC filings (`external/edgar/`) and the macro release dates (`external/macro/`) used in Part IV are in the repository. To download the filings again (about 20 minutes), the SEC asks for a name and an email:
-
-```bash
-SEC_USER_AGENT="Your Name your.email@epfl.ch" python -m scripts.collect_news
-```

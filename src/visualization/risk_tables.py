@@ -3,6 +3,7 @@ import pandas as pd
 from src.features.calendar import night_calendar_summary
 
 
+# Figure sizes, fonts, offsets and rounding below are display choices only.
 def calendar_table(calendar: pd.DataFrame) -> pd.DataFrame:
     """Show counts and mean elapsed hours by closure type."""
     table = night_calendar_summary(calendar)[["nights", "mean_hours"]]

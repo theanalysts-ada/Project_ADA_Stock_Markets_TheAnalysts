@@ -11,6 +11,8 @@ from src.data.quality import FILTERS, flag_suspicious
 from src.features.returns import add_dollar_volume, add_returns
 from src.features.volume import abnormal_volume
 
+# Return units: x100 for %, x10000 for bp; rounding only controls displayed precision.
+
 # Words of a security name that say nothing about the brand (legal terms, type of security...)
 IGNORED_WORDS = {
     "common", "stock", "shares", "share", "class", "ordinary", "inc", "incorporated", "corp", "corporation",
@@ -116,6 +118,7 @@ def _tokens(security_name):
     return re.sub(r"[^a-z0-9]+", " ", security_name.lower()).split()
 
 
+# At least four letters reduce accidental matches with short/common words.
 def name_words(security_name, min_length=4):
     """Distinctive words of a security name: no legal terms and no word shorter than min_length."""
     words = set()
@@ -141,6 +144,7 @@ def first_word(security_name):
     return tokens[0]
 
 
+# Heuristics: exact matches, >=4 letters, ~3 months of overlap, at most 3 name owners.
 def ticker_name_matches(meta, coverage, max_distance=0, min_length=4, min_overlap_days=90, max_owners=3,
                         ordinary_only=True, drop_fund_families=True):
     """Tickers that look like a word of another company's name (ticker ALPHA, company "Alpha Video").
@@ -214,6 +218,7 @@ def ticker_name_matches(meta, coverage, max_distance=0, min_length=4, min_overla
     return hits[columns].sort_values(["ticker", "owner"]).reset_index(drop=True)
 
 
+# Use the same heuristic 3x-volume spike threshold as Part V.
 def load_pair(buzz, receiver, threshold=3.0):
     """Prices of two tickers with returns, quality flags and attention spikes (as in Parts I and V).
 
@@ -309,6 +314,7 @@ def placebo_pvalue(score, placebo_scores):
     scores = np.array(placebo_scores, dtype=float)
     scores = scores[~np.isnan(scores)]
     n_larger = (scores >= score).sum()
+    # Add one to include the observed case and avoid a zero Monte Carlo p-value.
     return float((1 + n_larger) / (1 + len(scores)))
 
 
@@ -337,6 +343,7 @@ def usual_overnight_return(case, ticker, flags=PAIR_FLAGS, start_year=STUDY_STAR
     return float(night.mean())
 
 
+# 100 controls limit runtime; $10m/day and 2000 sessions select liquid, long-history stocks.
 def pair_placebo_test(receiver, buzz, flags=PAIR_FLAGS, n_placebos=100, min_pool_dollar=1e7, min_pool_days=2000,
                       start_year=STUDY_START_YEAR):
     """Does the receiver gain more overnight after the spikes of its well-known company than after the spikes

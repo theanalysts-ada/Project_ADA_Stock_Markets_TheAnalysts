@@ -2,6 +2,7 @@ import pandas as pd
 import pandas_market_calendars as mcal
 
 
+# Separate routine closures from shutdowns outside the regular holiday schedule.
 NIGHT_TYPES = ["Weekday", "Weekend", "Long weekend", "Midweek holiday", "Exceptional closure"]
 
 
@@ -21,13 +22,18 @@ def build_night_calendar(start_date, end_date) -> pd.DataFrame:
         night_hours, night_type, previous_early_close, dst_change and dst_monday.
         Exceptional closures are identified from exceptional full-day holidays in the calendar.
     """
+    # Convert the requested dates and check that the period is valid.
     start, end = pd.Timestamp(start_date), pd.Timestamp(end_date)
     if start > end:
         raise ValueError("start_date must be on or before end_date")
+
+    # Load NYSE sessions, including 30 earlier days to find the previous close.
     market = mcal.get_calendar("NYSE")
     schedule = market.schedule(start_date=start - pd.Timedelta(days=30), end_date=end)
     schedule.index.name = "date"
     schedule = schedule.reset_index()
+
+    # Pair each opening with the previous session and close, then keep the requested dates.
     calendar = pd.DataFrame({
         "date": schedule["date"],
         "previous_session": schedule["date"].shift(1),
@@ -35,37 +41,45 @@ def build_night_calendar(start_date, end_date) -> pd.DataFrame:
         "market_open": schedule["market_open"],
     })
     calendar = calendar[calendar["date"].between(start, end)].reset_index(drop=True)
-    calendar["night_hours"] = (calendar["market_open"] - calendar["previous_close"]).dt.total_seconds() / 3600
 
+    # Measure each closure in elapsed hours using UTC timestamps (3600 seconds per hour).
+    duration = calendar["market_open"] - calendar["previous_close"]
+    calendar["night_hours"] = duration.dt.total_seconds() / 3600
+
+    # Classify routine closures from the number of days and the opening/closing weekdays.
     gap = (calendar["date"] - calendar["previous_session"]).dt.days
-    previous_day = calendar["previous_session"].dt.dayofweek
-    day = calendar["date"].dt.dayofweek
-    long_weekend = (gap >= 4) & previous_day.isin([3, 4]) & day.isin([0, 1])
-    weekend = (gap == 3) & (previous_day == 4) & (day == 0)
+    previous_day = calendar["previous_session"].dt.day_name()
+    day = calendar["date"].dt.day_name()
+    # Holiday weekends span at least four days: Thursday/Friday to Monday/Tuesday.
+    long_weekend = (gap >= 4) & previous_day.isin(["Thursday", "Friday"]) & day.isin(["Monday", "Tuesday"])
+    # A regular Friday-to-Monday closure spans three calendar days.
+    weekend = (gap == 3) & (previous_day == "Friday") & (day == "Monday")
     calendar["night_type"] = "Midweek holiday"
     calendar.loc[gap == 1, "night_type"] = "Weekday"
     calendar.loc[weekend, "night_type"] = "Weekend"
     calendar.loc[long_weekend, "night_type"] = "Long weekend"
 
-    adhoc = pd.DatetimeIndex(market.adhoc_holidays).tz_localize(None)
-    adhoc = adhoc[(adhoc.dayofweek < 5) & (adhoc > calendar["previous_session"].min())
-                  & (adhoc < calendar["date"].max())].unique()
-    for holiday in adhoc:
+    # Mark closures spanning exceptional weekday shutdowns and order the closure categories.
+    for holiday in market.adhoc_holidays:
+        holiday = pd.Timestamp(holiday).tz_localize(None)
+        if holiday.dayofweek >= 5:  # Saturday/Sunday do not add a closed weekday.
+            continue
         spans_holiday = (calendar["previous_session"] < holiday) & (holiday < calendar["date"])
         calendar.loc[spans_holiday, "night_type"] = "Exceptional closure"
     calendar["night_type"] = pd.Categorical(calendar["night_type"], categories=NIGHT_TYPES, ordered=True)
 
+    # Flag early closes by comparing the local closing hour with the regular 16:00 close.
     local_close = calendar["previous_close"].dt.tz_convert("America/New_York")
     local_open = calendar["market_open"].dt.tz_convert("America/New_York")
     calendar["previous_early_close"] = local_close.dt.hour < 16
-    # A change in UTC offset identifies the US daylight-saving transition.
+
+    # Detect spring/autumn clock changes from UTC offsets and flag the affected Mondays.
     close_offset = local_close.map(lambda time: time.utcoffset())
     open_offset = local_open.map(lambda time: time.utcoffset())
-    change = (open_offset - close_offset).dt.total_seconds() / 3600
     calendar["dst_change"] = "none"
-    calendar.loc[change > 0, "dst_change"] = "spring"
-    calendar.loc[change < 0, "dst_change"] = "autumn"
-    calendar["dst_monday"] = (day == 0) & (change != 0)
+    calendar.loc[open_offset > close_offset, "dst_change"] = "spring"
+    calendar.loc[open_offset < close_offset, "dst_change"] = "autumn"
+    calendar["dst_monday"] = (day == "Monday") & (open_offset != close_offset)
     return calendar
 
 

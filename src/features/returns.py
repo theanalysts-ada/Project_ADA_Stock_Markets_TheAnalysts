@@ -64,6 +64,7 @@ def add_returns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# 20 sessions approximate a trading month and smooth one-day volume spikes.
 def lagged_mean_dollar_volume(df: pd.DataFrame, window: int = 20) -> pd.Series:
     """Mean dollar volume of the previous `window` trading days of each ticker (excludes today)."""
     prev = df.groupby("ticker", observed=True)["dollar_volume"].shift(1)
@@ -95,7 +96,10 @@ def portfolio_returns(df: pd.DataFrame, weighting: str = "equal") -> pd.DataFram
         out = {}
         for col in cols:
             tmp = work.dropna(subset=[col])
-            out[col] = tmp[col].mul(tmp["_w"]).groupby(tmp["date"]).sum() / tmp["_w"].groupby(tmp["date"]).sum()
+            weighted_returns = tmp[col] * tmp["_w"]
+            total_returns = weighted_returns.groupby(tmp["date"]).sum()
+            total_weights = tmp["_w"].groupby(tmp["date"]).sum()
+            out[col] = total_returns / total_weights
         return pd.DataFrame(out)
     raise ValueError(f"Unknown weighting: {weighting}")
 

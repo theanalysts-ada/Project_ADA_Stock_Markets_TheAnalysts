@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+# Figure sizes, fonts, offsets and rounding below are display choices only.
+# Use consistent colors for night/day returns, buy-and-hold, stocks and ETFs.
 NIGHT = "#1f3a68"
 DAY = "#f28e2b"
 BUY_HOLD = "#8c8c8c"
@@ -42,6 +44,7 @@ def plot_tickers_per_year(counts: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Start ETF panels in 1993 to avoid the sparsely populated earlier years.
 def plot_suspicious_share(share: pd.DataFrame, etf_start: int = 1993) -> plt.Figure:
     """Figure G3: share of suspicious observations per year, stocks vs ETFs.
 
@@ -59,6 +62,7 @@ def plot_suspicious_share(share: pd.DataFrame, etf_start: int = 1993) -> plt.Fig
         for flag in data.columns.drop("stale_open"):
             ax.plot(data.index, data[flag], lw=1.2, label=flag)
         ax.plot(data.index, data["stale_open"], color="black", lw=2.5, label="stale_open (any of the 3 open flags)")
+        # Mark the decimalisation year discussed in the data-quality analysis.
         ax.axvline(2001, color=BUY_HOLD, ls="--", lw=1)
         ax.text(2001.5, 95, "2001 decimalisation", color=BUY_HOLD, fontsize=10)
         ax.set(title=title, xlabel="Year", ylim=(0, 100))
@@ -78,6 +82,7 @@ def plot_return_distributions(df: pd.DataFrame, limit: float = 20) -> plt.Figure
     Returns:
         The figure.
     """
+    # 200 bins within +/-20% by default make the central distribution readable.
     bins = np.linspace(-limit, limit, 201)
     fig, axes = plt.subplots(1, 2, sharey=True, figsize=(13, 4.5))
     for ax, asset, title in zip(axes, ["stock", "etf"], ["Stocks", "ETFs"]):
@@ -101,6 +106,7 @@ def plot_volume_distribution(df: pd.DataFrame) -> plt.Figure:
     Returns:
         The figure.
     """
+    # 80 logarithmic bins cover $100 to $1 trillion across very different liquidity levels.
     bins = np.logspace(2, 12, 81)
     fig, ax = plt.subplots()
     for asset, label, color in [("stock", "Stocks", STOCK), ("etf", "ETFs", ETF)]:
@@ -115,6 +121,7 @@ def plot_volume_distribution(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+# Reference dates used to locate the dot-com, 2008 and COVID episodes on wealth plots.
 CRISES = (
     (pd.Timestamp("2000-03-24"), "2000 dot-com"),
     (pd.Timestamp("2008-09-15"), "2008 crisis"),
@@ -185,12 +192,14 @@ def plot_gap_histogram(gaps: pd.DataFrame) -> plt.Figure:
     Returns:
         The figure.
     """
+    # Focus on gaps from -100% to +200%; count out-of-range tickers in the title.
     lo, hi = -100, 200
     fig, axes = plt.subplots(1, 2, sharey=True, figsize=(13, 4.5))
     for ax, asset, title, color in zip(axes, ["stock", "etf"], ["Stocks", "ETFs"], [STOCK, ETF]):
         values = gaps.loc[gaps["asset_type"] == asset, "gap"]
         outside = int(((values < lo) | (values > hi)).sum())
         shown = values[(values >= lo) & (values <= hi)]
+        # 60 bins balance detail and readability within the displayed gap range.
         ax.hist(shown, bins=60, color=color, weights=np.full(len(shown), 100 / len(values)))
         ax.axvline(0, color=BUY_HOLD, ls="--", lw=1)
         ax.axvline(values.median(), color="black", lw=1.5, label=f"median ({values.median():.1f} %)")
@@ -213,6 +222,7 @@ def plot_gap_heatmap(table: pd.DataFrame) -> plt.Figure:
     """
     fig, ax = plt.subplots(figsize=(8, 7))
     values = table.to_numpy(dtype="float64")
+    # Cap the color scale at the 95th absolute percentile so extremes do not hide the pattern.
     limit = np.nanpercentile(np.abs(values), 95)
     image = ax.imshow(values, aspect="auto", origin="lower", cmap="RdBu", vmin=-limit, vmax=limit)
     ax.set(
@@ -235,6 +245,7 @@ def plot_filter_comparison(table: pd.DataFrame) -> plt.Figure:
     """
     fig, ax = plt.subplots()
     x = np.arange(len(table))
+    # Narrower than half a category so the two bars fit side by side.
     width = 0.35
     ax.bar(x - width / 2, table["SPY gap"], width, color=BUY_HOLD, label="SPY")
     ax.bar(x + width / 2, table["EW stocks gap"], width, color=STOCK, label="Equal-weighted stocks")
@@ -247,6 +258,7 @@ def plot_filter_comparison(table: pd.DataFrame) -> plt.Figure:
 
 def _portfolio_grid(names: pd.Index) -> tuple[plt.Figure, np.ndarray]:
     """Two panels per row with shared axes, one per portfolio; unused panels are hidden."""
+    # At most two portfolios per row keeps the four main panels readable.
     ncols = min(2, len(names))
     nrows = int(np.ceil(len(names) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 4.5 * nrows), squeeze=False, sharex=True, sharey=True)
@@ -290,27 +302,42 @@ def plot_risk_by_night_type(summaries: pd.DataFrame) -> plt.Figure:
 
 def plot_duration_predictions(predictions: pd.DataFrame, summaries: pd.DataFrame, results: pd.DataFrame) -> plt.Figure:
     """Plot fitted means, bootstrap bands and both coefficients with their 95 % intervals."""
+    # Create one panel per portfolio.
     names = predictions["portfolio"].unique()
     fig, axes = _portfolio_grid(names)
+
+    # Use the same duration range for every panel.
     first, last = predictions["night_hours"].min(), predictions["night_hours"].max()
+    # Pad the duration axis by 5% to keep endpoints away from the frame.
     margin = 0.05 * (last - first)
     for ax, name in zip(axes.flat, names):
+        # Select this portfolio's predictions, routine-closure means and color.
         table = predictions.loc[predictions["portfolio"] == name]
         means = summaries.loc[(summaries["portfolio"] == name) & (summaries["night_type"] != "Exceptional closure")]
         color = STOCK if name.startswith("Stocks") else ETF
+
+        # Draw the fitted mean and its pointwise 95% bootstrap band.
         ax.fill_between(table["night_hours"], table["CI 95% low"], table["CI 95% high"], color=color, alpha=0.18, label="95 % CI for fitted mean")
         ax.plot(table["night_hours"], table["mean (bp)"], color=color, label="Fitted mean")
+
+        # Add the observed mean for each routine closure type and label it.
         ax.scatter(means["mean hours"], means["mean (bp)"], color=color, edgecolor="white", zorder=3, label="Observed category mean")
         for _, row in means.iterrows():
             ax.annotate(row["night_type"], (row["mean hours"], row["mean (bp)"]), xytext=(0, 8), textcoords="offset points", ha="center", fontsize=9)
+
+        # Add the zero-return reference and set the panel title and duration axis.
         ax.axhline(0, color=BUY_HOLD, ls="--", lw=1)
         ax.set(title=name, xlabel="Closure duration (hours)", xlim=(first - margin, last + margin))
+
+        # Read the baseline model coefficients and their bootstrap intervals.
         main = results.loc[(results["portfolio"] == name)
                            & (results["specification"] == "Main, 21-session blocks")].iloc[0]
         slope = main["beta (bp/hour)"]
         low, high = main["CI 95% low"], main["CI 95% high"]
         mu = main["mu (bp/night)"]
         mu_low, mu_high = main["mu CI low"], main["mu CI high"]
+
+        # Format beta and mu with their intervals and display them inside the panel.
         coefficient_label = (
             f"Beta = {slope:+.3f} [{low:+.3f}, {high:+.3f}] bp/hour\n"
             f"Mu (17.5 h) = {mu:+.2f} [{mu_low:+.2f}, {mu_high:+.2f}] bp/night"
@@ -319,6 +346,8 @@ def plot_duration_predictions(predictions: pd.DataFrame, summaries: pd.DataFrame
                 transform=ax.transAxes, ha="right", va="bottom", fontsize=10,
                 bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.85})
         ax.tick_params(axis="x", labelbottom=True)
+
+    # Add return-axis labels, a shared legend and the figure title, then adjust spacing.
     for ax in axes[:, 0]:
         ax.set_ylabel("Overnight return (bp per night)")
     axes.flat[0].legend(fontsize=9, loc="lower left")

@@ -4,11 +4,14 @@ import pandas as pd
 from src.visualization.plots import BUY_HOLD, DAY, NIGHT
 
 
+# Figure sizes, fonts, offsets and rounding below are display choices only.
 def plot_filing_times(profile: pd.DataFrame) -> plt.Figure:
     """Figure N1: time of the day at which 8-Ks are filed (New York time)."""
     fig, ax = plt.subplots()
+    # 9.5 and 16 encode the reference US session, 09:30 to 16:00 New York time.
     ax.axvspan(9.5, 16, color=DAY, alpha=0.12, label="Trading session (9:30–16:00)")
     slots = profile.index
+    # Offsets 0.14/0.36 and width 0.22 fit two bars inside each half-hour slot.
     ax.bar(slots + 0.14, profile["earnings"], width=0.22, color=NIGHT, label="Earnings 8-Ks (item 2.02)")
     ax.bar(slots + 0.36, profile["other 8-K"], width=0.22, color=BUY_HOLD, label="Other 8-Ks")
     ax.set(xlim=(0, 24), xticks=range(0, 25, 2), title="When do firms file their news?",

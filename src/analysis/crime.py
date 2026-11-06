@@ -4,6 +4,7 @@ import pandas as pd
 from src.features.returns import TRADING_DAYS_PER_YEAR, cumulative_wealth
 
 
+# Return units: x100 for %, x10000 for bp; rounding only controls displayed precision.
 def ticker_wealth(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     """Night-only, day-only and buy-and-hold wealth of $1 for one ticker.
 
@@ -78,6 +79,7 @@ def strategy_headline(pair: pd.DataFrame) -> pd.DataFrame:
     return crime_headline(dummy, "portfolio")
 
 
+# Require about one trading year before reporting a ticker-level mean.
 MIN_OBS = 252
 
 
@@ -108,12 +110,10 @@ def portfolio_paths(portfolios: dict[str, pd.DataFrame], names: list[str] | None
 
 def portfolio_headlines(portfolios: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Stack strategy_headline for each portfolio."""
-    parts = []
+    tables = {}
     for name, pair in portfolios.items():
-        table = strategy_headline(pair)
-        table.index = pd.MultiIndex.from_product([[name], table.index], names=["portfolio", "strategy"])
-        parts.append(table)
-    return pd.concat(parts)
+        tables[name] = strategy_headline(pair)
+    return pd.concat(tables, names=["portfolio", "strategy"])
 
 
 def night_day_gap_by_ticker(df: pd.DataFrame, min_obs: int = MIN_OBS) -> pd.DataFrame:
@@ -170,26 +170,29 @@ def gap_heatmap_table(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Rows = years, columns = Stocks, ETFs, Q1–Q5.
     """
-    keep = df["r_night"].notna() & df["r_day"].notna()
-    year = df.loc[keep, "date"].dt.year
-    night = df.loc[keep, "r_night"].astype("float64")
-    day = df.loc[keep, "r_day"].astype("float64")
-    asset = df.loc[keep, "asset_type"]
     from src.features.returns import lagged_mean_dollar_volume
-    weight = lagged_mean_dollar_volume(df).loc[keep]
-    quintile = np.ceil(5 * weight.groupby(year).rank(pct=True))
+
+    columns = ["date", "asset_type", "r_night", "r_day"]
+    sample = df[columns].dropna(subset=["r_night", "r_day"]).copy()
+    sample[["r_night", "r_day"]] = sample[["r_night", "r_day"]].astype("float64")
+    sample["year"] = sample["date"].dt.year
+    sample["weight"] = lagged_mean_dollar_volume(df).loc[sample.index]
+    ranks = sample.groupby("year")["weight"].rank(pct=True)
+    # Split yearly liquidity ranks into five groups (Q1 to Q5).
+    sample["quintile"] = np.ceil(5 * ranks)
     scale = 100 * TRADING_DAYS_PER_YEAR
 
-    def gap(n: pd.Series, d: pd.Series, by) -> pd.Series:
-        return scale * (n.groupby(by, observed=True).mean() - d.groupby(by, observed=True).mean())
+    means = sample.groupby(["year", "asset_type"], observed=True)[["r_night", "r_day"]].mean()
+    gaps = scale * (means["r_night"] - means["r_day"])
+    table = gaps.unstack().reindex(columns=["stock", "etf"])
+    table.columns = ["Stocks", "ETFs"]
 
-    table = pd.DataFrame({
-        "Stocks": gap(night[asset == "stock"], day[asset == "stock"], year[asset == "stock"]),
-        "ETFs": gap(night[asset == "etf"], day[asset == "etf"], year[asset == "etf"]),
-    })
-    by_q = gap(night, day, [year, quintile]).unstack()
+    means = sample.groupby(["year", "quintile"], observed=True)[["r_night", "r_day"]].mean()
+    gaps = scale * (means["r_night"] - means["r_day"])
+    by_q = gaps.unstack()
     by_q.columns = [f"Q{int(c)}" for c in by_q.columns]
     table = pd.concat([table, by_q], axis=1).rename_axis("year")
+    # Omit 2020 because prices stop on 1 April: it is not a complete year.
     return table.loc[table.index < 2020].round(1)
 
 
@@ -207,13 +210,18 @@ def filter_comparison(prices: pd.DataFrame, start_year: int, filters: dict[str, 
     from src.data.quality import apply_quality_filter
     from src.features.returns import portfolio_returns
 
-    slim = prices[["ticker", "date", "asset_type", "r_night", "r_day", *{f for flags in filters.values() for f in flags}]]
+    columns = ["ticker", "date", "asset_type", "r_night", "r_day"]
+    for flags in filters.values():
+        for flag in flags:
+            if flag not in columns:
+                columns.append(flag)
+    slim = prices[columns]
+    scale = 100 * TRADING_DAYS_PER_YEAR
     rows = {}
     for name, flags in filters.items():
         sample = apply_quality_filter(slim, start_year, flags)
         spy = sample.loc[sample["ticker"] == "SPY", ["r_night", "r_day"]].dropna()
         ew = portfolio_returns(sample.loc[sample["asset_type"] == "stock"], "equal")
-        scale = 100 * TRADING_DAYS_PER_YEAR
         rows[name] = {
             "SPY night": scale * spy["r_night"].mean(),
             "SPY day": scale * spy["r_day"].mean(),
@@ -264,6 +272,7 @@ def night_indicator_regression(df: pd.DataFrame, log: bool = False) -> pd.DataFr
     }]).round(4)
 
 
+# 21 sessions ~ one trading month; 1000 draws balance precision and runtime; seed=0 fixes the draws.
 def block_bootstrap_ci(diff: pd.Series, block: int = 21, n: int = 1000, seed: int = 0) -> pd.DataFrame:
     """Block-bootstrap 95 % CI for the mean of a daily night − day series.
 
@@ -285,6 +294,7 @@ def block_bootstrap_ci(diff: pd.Series, block: int = 21, n: int = 1000, seed: in
         starts = rng.integers(0, n_obs - block + 1, size=n_blocks)
         sample = np.concatenate([x[s:s + block] for s in starts])[:n_obs]
         means[i] = sample.mean()
+    # Leave 2.5% in each tail for a central 95% bootstrap interval.
     lo, hi = np.percentile(means, [2.5, 97.5])
     return pd.DataFrame([{
         "block": block,
@@ -328,6 +338,7 @@ def gap_tests_by_period(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=["r_night", "r_day"])
     first_year, last_year = df["date"].dt.year.min(), df["date"].dt.year.max()
     samples = {f"{first_year}–{last_year}": df}
+    # Split at the financial-crisis year to compare the two historical periods.
     if first_year < 2008 <= last_year:
         samples[f"{first_year}–2007"] = df[df["date"].dt.year <= 2007]
         samples[f"2008–{last_year}"] = df[df["date"].dt.year >= 2008]

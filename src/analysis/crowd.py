@@ -5,6 +5,8 @@ import pandas as pd
 from src.config import STUDY_START_YEAR
 
 
+# Five sessions on either side show roughly one trading week before and after a spike.
+# Return units: x100 for %, x10000 for bp; rounding only controls displayed precision.
 def event_study(df, window=5, start_year=STUDY_START_YEAR, drop_flags=None):
     """Average night and day returns in the days around each volume spike.
 
@@ -43,6 +45,7 @@ def event_study(df, window=5, start_year=STUDY_START_YEAR, drop_flags=None):
                 "return": col,
                 "mean": values.mean(),
                 "median": values.median(),
+                # 1.96 is the standard-normal cutoff for an approximate two-sided 95% interval.
                 "ci95": 1.96 * values.std() / np.sqrt(len(values)),
                 "n": len(values),
             })

@@ -1,11 +1,14 @@
 import numpy as np
 import pandas as pd
 
+# Report data anomalies separately so filters can be compared.
 FLAGS = [
     "open_missing", "open_equals_prev_close", "open_equals_close", "flat_day", "zero_volume", "extreme_return",
     "spliced_history",
 ]
+# Missing opens or exact price equalities identify potentially stale opens.
 STALE_OPEN_FLAGS = ["open_missing", "open_equals_prev_close", "open_equals_close"]
+# Main liquidity screen, with stale-open and light alternatives for robustness.
 FILTERS = {
     "liquidity": ["open_missing", "illiquid", "extreme_return", "spliced_history"],
     "stale": STALE_OPEN_FLAGS + ["extreme_return", "spliced_history"],
@@ -21,10 +24,10 @@ def _prev_dollar_volume_rank(df: pd.DataFrame) -> pd.Series:
 
 def flag_suspicious(
     df: pd.DataFrame,
-    extreme_threshold: float = 0.5,
-    splice_factor: float = 10,
-    min_price: float = 5,
-    min_dollar_volume_rank: float = 0.2,
+    extreme_threshold: float = 0.5,  # Heuristic: flag half-day moves above 50%.
+    splice_factor: float = 10,  # Tenfold price jumps flag possible joined histories.
+    min_price: float = 5,  # Exclude low-priced stocks from the main sample.
+    min_dollar_volume_rank: float = 0.2,  # Drop the least-traded 20% within each year.
 ) -> pd.DataFrame:
     """Add one boolean column per type of suspicious observation, plus the illiquid flag, without removing rows.
 
@@ -109,8 +112,10 @@ def stale_share_by_liquidity(df: pd.DataFrame, start_year: int) -> pd.DataFrame:
     keep = df["date"].dt.year >= start_year
     stale = df.loc[keep, STALE_OPEN_FLAGS].any(axis=1)
     asset = df.loc[keep, "asset_type"]
+    # Five equal-frequency liquidity groups, from least to most traded.
     quintile = np.ceil(5 * _prev_dollar_volume_rank(df)[keep])
     prev_close = df.groupby("ticker", observed=True)["close"].shift(1)[keep]
+    # Use the same $5 price split as the default liquidity screen.
     price = (prev_close >= 5).map({False: "price < $5", True: "price >= $5"}).where(prev_close.notna())
     by_quintile = stale.groupby([asset, quintile], observed=True).mean().unstack()
     by_quintile.columns = [f"Q{q:.0f}" for q in by_quintile.columns]

@@ -25,6 +25,7 @@ def fetch_trends(term, start, end, connection=None):
         raise ValueError("Window too long: Google would return weekly data")
 
     if connection is None:
+        # pytrends uses minutes west of UTC: 300 encodes the fixed UTC-5 setting.
         connection = TrendReq(hl="en-US", tz=300)
 
     # Ask Google for this term over this period, in the US
@@ -37,6 +38,7 @@ def fetch_trends(term, start, end, connection=None):
     return df[term]
 
 
+# A two-second pause spaces requests to reduce throttling risk.
 def fetch_many(terms, start, end, pause=2):
     """Daily Google search interest for several terms, one request per term.
 
@@ -49,6 +51,7 @@ def fetch_many(terms, start, end, pause=2):
     Returns:
         A table with one column per term, and a dictionary with the error of each term that failed.
     """
+    # Use the same fixed UTC-5 request setting as fetch_trends.
     connection = TrendReq(hl="en-US", tz=300)
     data = {}
     errors = {}

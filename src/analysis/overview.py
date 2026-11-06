@@ -8,6 +8,7 @@ from src.config import DATA_DIR, DROPPED_FILE, PRICES_FILE
 from src.data.load import load_prices, read_one_csv
 
 
+# Return units: x100 for %, x10000 for bp; rounding only controls displayed precision.
 def tickers_per_year(prices: pd.DataFrame) -> pd.DataFrame:
     """Count the distinct tickers with at least one observation in each year.
 
@@ -22,6 +23,7 @@ def tickers_per_year(prices: pd.DataFrame) -> pd.DataFrame:
     return counts[["stock", "etf"]].rename_axis(columns=None)
 
 
+# Show only the five most common starting dates to keep the diagnostic compact.
 def first_dates(prices: pd.DataFrame, n: int = 5) -> pd.DataFrame:
     """Find the dates on which the most tickers have their first observation.
 
@@ -58,6 +60,7 @@ def removed_rows_summary(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return summary.rename_axis("reason")
 
 
+# AAPL on 7 February 2020 illustrates the ex-dividend adjustment in Part I.
 def adjustment_example(prices: pd.DataFrame, ticker: str = "AAPL", date: str = "2020-02-07") -> pd.DataFrame:
     """Compare the raw and the adjusted overnight return of a ticker on one day (e.g. an ex-dividend date).
 
@@ -188,6 +191,7 @@ def _read_sample(paths: list[Path], optimised: bool) -> tuple[pd.DataFrame, floa
     return df, time.perf_counter() - start
 
 
+# Benchmark 500 files to limit cost; seed=0 keeps the sampled files reproducible.
 def size_report(data_dir: Path = DATA_DIR, n_sample: int = 500, seed: int = 0) -> pd.DataFrame:
     """Compare rows, memory, loading time and disk size of the raw CSVs and of the Parquet file.
 
@@ -217,6 +221,7 @@ def size_report(data_dir: Path = DATA_DIR, n_sample: int = 500, seed: int = 0) -
     for name, optimised in columns.items():
         df, elapsed = _read_sample(sample, optimised)
         memory = df.memory_usage(deep=True).sum() / len(df) * raw_rows
+        # 1e9 bytes per decimal GB, for both memory and disk comparisons.
         report[name] = [raw_rows, memory / 1e9, elapsed * scale, csv_disk / 1e9]
     parquet_disk = (data_dir / PRICES_FILE).stat().st_size
     report["Parquet"] = [len(prices), prices.memory_usage(deep=True).sum() / 1e9, parquet_time, parquet_disk / 1e9]
