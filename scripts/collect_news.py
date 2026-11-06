@@ -1,4 +1,4 @@
-"""Download the 8-Ks of every stock into data/edgar/ (about 20 minutes; a stopped run can be restarted).
+"""Download the 8-Ks of every stock into external/edgar/ (about 20 minutes; a stopped run can be restarted).
 
     SEC_USER_AGENT="Your Name your.email@epfl.ch" python -m scripts.collect_news
 """

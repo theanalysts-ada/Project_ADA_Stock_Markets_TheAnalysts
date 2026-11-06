@@ -6,9 +6,9 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-from src.config import DATA_DIR
+from src.config import ROOT_DIR
 
-MACRO_DIR = DATA_DIR / "macro"
+MACRO_DIR = ROOT_DIR / "external" / "macro"
 FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomchistorical{year}.htm"
 FRED_URL = "https://api.stlouisfed.org/fred/"
 # CPI release dates on FRED include seasonal revisions, so we use the unadjusted series.

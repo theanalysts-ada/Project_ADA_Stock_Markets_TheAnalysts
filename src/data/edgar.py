@@ -10,9 +10,9 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-from src.config import DATA_DIR
+from src.config import ROOT_DIR
 
-EDGAR_DIR = DATA_DIR / "edgar"
+EDGAR_DIR = ROOT_DIR / "external" / "edgar"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 NAMES_URL = "https://www.sec.gov/Archives/edgar/cik-lookup-data.txt"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/"

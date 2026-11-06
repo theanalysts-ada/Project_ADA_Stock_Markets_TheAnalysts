@@ -1,10 +1,7 @@
-/data/*
-!/data/macro/
-!/data/edgar/
-/data/edgar/*
-!/data/edgar/mapping.parquet
-!/data/edgar/issuers.parquet
-!/data/edgar/filings_8k.parquet
+/data/
+/external/edgar/cache/
+/external/edgar/cik-lookup-data.txt
+/external/edgar/collect.log
 __pycache__/
 .ipynb_checkpoints/
 .DS_Store

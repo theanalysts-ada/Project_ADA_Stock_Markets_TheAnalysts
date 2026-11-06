@@ -94,7 +94,7 @@ Each member keeps their part and carries out its P3 next steps, detailed at the 
 
 1. Python 3.10 or newer, then `pip install -r requirements.txt`.
 2. Run `results.ipynb` from the top. The first cells download the Kaggle files (about 520 MB) and build the price table.
-3. The SEC filings (`data/edgar/`) and the macro release dates (`data/macro/`) used in Part IV are in the repository. To download the filings again (about 20 minutes), the SEC asks for a name and an email:
+3. The SEC filings (`external/edgar/`) and the macro release dates (`external/macro/`) used in Part IV are in the repository. To download the filings again (about 20 minutes), the SEC asks for a name and an email:
 
 ```bash
 SEC_USER_AGENT="Your Name your.email@epfl.ch" python -m scripts.collect_news
