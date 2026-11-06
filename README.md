@@ -2,25 +2,25 @@
 
 ## Abstract
 
-Buy an S&P 500 fund at every close and sell it at the next open: from 1998 to 2020, one dollar becomes \$4.74. Hold it only during the trading day instead, and it shrinks to 80 cents. Yet the session is when almost all trading and news reactions happen. So who makes money while Wall Street sleeps? We treat this anomaly as an investigation. After establishing the crime, we question three suspects: **risk**, whether holding stocks through longer nights is rewarded; **news**, whether firms publish after the close; and **the crowd**, whether attention brings buyers at the open who sell back during the day. Finally, tickers that investors mistake for famous ones offer a natural experiment: attention without news.
+Buy an S&P 500 fund at every close and sell it at the next open: from 1998 to 2020, one dollar becomes \$4.74. Hold it only during the trading day instead, and it shrinks to 80 cents. Yet the session is when almost all trading and news reactions happen. So who makes money while Wall Street sleeps? After establishing the crime, we question three suspects: **risk**, whether holding stocks through longer nights is rewarded; **news**, whether firms publish after the close; and **the crowd**, whether attention brings buyers at the open who sell back during the day. Finally, tickers that investors mistake for famous ones offer a natural experiment: attention without news.
 
 ## Research Questions
 
-1. **Crime:** do overnight returns exceed intraday returns across US stocks and ETFs, and does the gap survive data cleaning and statistical tests?
-2. **Risk:** do longer closures (weekends, holidays) earn higher overnight returns?
-3. **News:** are 8-K announcements concentrated after the close, and do nights without news still earn more?
-4. **Crowd:** after a spike of attention, do we see an overnight gain followed by an intraday loss?
-5. **Proof:** after a famous company's attention spikes, does a stock mistaken for it gain more than usual overnight, compared with placebo stocks?
+1. **Crime:** do overnight returns beat intraday returns, even after cleaning and testing?
+2. **Risk:** do longer closures earn more overnight?
+3. **News:** do 8-Ks arrive after the close, and do nights without news still earn more?
+4. **Crowd:** does an attention spike bring an overnight gain, then an intraday loss?
+5. **Proof:** does a stock mistaken for a famous one gain more overnight after that company's attention spikes than after placebo spikes?
 
 ## Proposed additional datasets
 
 ### SEC EDGAR 8-K filings (Part IV)
 
-Listed US firms must file an **8-K** within four business days of any important event; **Item 2.02** marks earnings announcements. `scripts/collect_news.py` links stocks to their SEC identifier (CIK), also by name for firms renamed or delisted since 2020: **4,197 stocks** (75.9 % of rows) are matched. Filing times exist from 2003, and the **557,104** 8-Ks since then are placed in a night or a session. Foreign firms file 6-Ks and are excluded.
+Listed US firms must file an **8-K** within four business days of any important event. `scripts/collect_news.py` links stocks to their SEC identifier (CIK), also by name for firms renamed or delisted since 2020: **4,197 stocks** (75.9 % of rows) are matched. Filing times exist from 2003, and the **557,104** 8-Ks since then are placed in a night or a session. Foreign firms file 6-Ks and are excluded.
 
 ### Macroeconomic calendar (Part IV)
 
-On SPY, firm news averages out, so we add the **jobs report** and the **CPI** (8:30, during the night; FRED API) and **FOMC** statements (14:00, during the session; Federal Reserve website): **267, 267 and 177** releases from 1998 to 2020. PPI, retail sales and GDP follow in P3.
+On SPY, firm news averages out, so we add the **jobs report** and the **CPI** (8:30, during the night; FRED API) and **FOMC** statements (14:00, during the session; Federal Reserve website): **267, 267 and 177** releases over 1998–2020.
 
 ### NYSE trading calendar (Part III)
 
@@ -28,7 +28,7 @@ On SPY, firm news averages out, so we add the **jobs report** and the **CPI** (8
 
 ### Google Trends (Part V, for P3)
 
-Tested with the unofficial `pytrends` on ten large companies: "*X* stock" tracks interest in the stock better than the company name, but daily data come only in short windows. We go ahead in a limited way, for about 30 large companies, with abnormal volume as fallback.
+Tested with the unofficial `pytrends` on ten large companies: "*X* stock" works better than the company name, but daily data come only in short windows. We will use it for about 30 large companies, with abnormal volume as fallback.
 
 ## Methods
 
@@ -50,18 +50,18 @@ Press releases often come before the 8-K, so we test whether the gap survives on
 
 ### Crowd (Part V)
 
-A spike is a day with volume above three times its previous 20-day mean. An **event study** averages overnight and intraday returns over the five days around each spike, looking for the **hangover** (an overnight gain followed by an intraday loss), repeated at two and five times to see if it grows with attention.
+A spike is a day with volume above three times its previous 20-day mean. An **event study** averages overnight and intraday returns over the five days around each spike, looking for the **hangover**, then repeats it at thresholds 2 and 5 to check it grows with attention.
 
 ### Proof (Part VI)
 
-A stock mistaken for a famous company is assumed to have no news of its own, so an overnight gain after the famous company's spikes points to the crowd. Matching tickers to words of company names gives 94 candidates; with `ZOOM` absent, we study `FORD` (Forward Industries) after the spikes of `F` (Ford Motor), against a **placebo** of the 100 stocks closest in size to `F`.
+A stock mistaken for a famous company is assumed to have no news of its own, so its overnight gain points to the crowd. Matching tickers to company names gives 94 candidates; we study `FORD` (Forward Industries) after the spikes of `F` (Ford Motor), against a **placebo** of the 100 stocks closest in size to `F`.
 
 ### Limitations
 
-- *Survivorship bias:* only securities listed in 2020 are included.
-- *Daily data:* opens are noisy for rarely traded names, and effects lasting hours are invisible.
-- *Fragile significance:* the SPY gap is method-dependent (clustered p = 0.073; the bootstrap excludes zero).
-- *Associations, not causes:* firms choose when to file and spikes often come with news; the proof rests on one case (34 events).
+- *Survivorship bias:* only securities listed in 2020.
+- *Daily data:* noisy opens for rarely traded names; effects lasting hours are invisible.
+- *Fragile significance:* the SPY gap depends on the method (clustered p = 0.073).
+- *Associations, not causes:* firms choose when to file, spikes often come with news, and the proof rests on one case.
 
 ## Proposed timeline
 
@@ -75,7 +75,7 @@ A stock mistaken for a famous company is assumed to have no news of its own, so 
 
 ## Organization within the team
 
-Each member keeps their part and carries out its P3 next steps, detailed at the end of each notebook part:
+Each member carries out the P3 next steps of their part (see the notebook):
 
 - Sara: data pipeline and the crime (Parts I–II).
 - Omar: risk (Part III).
@@ -86,5 +86,5 @@ Each member keeps their part and carries out its P3 next steps, detailed at the 
 
 ## Questions for TAs
 
-1. Foreign firms earn a gap of 20.9 % a year, against 3.5 % for US firms under the same ticker (Part IV), and their US night overlaps their home session. Should we drop them from every part?
-2. For some suspects our data cannot give a clear verdict: risk is not measured directly, press articles are missing, and the proof has one case. Should we look for other evidence, or deepen the current analyses as planned?
+1. Foreign firms earn 20.9 % a year against 3.5 % for US firms (Part IV), but their US night overlaps their home session. Should we drop them everywhere?
+2. Given these limitations, some suspects may stay unresolved. Should we seek other evidence, or deepen our analyses?
