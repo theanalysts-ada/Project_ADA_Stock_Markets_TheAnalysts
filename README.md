@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Buy an S&P 500 fund at every close and sell it at the next open: from 1998 to 2020, one dollar becomes \$4.74. Hold it only during the trading day instead, and it shrinks to 80 cents. Yet the session is when almost all trading and news reactions happen. So who makes money while Wall Street sleeps? After establishing the crime, we question three suspects: **risk**, whether holding stocks through longer nights is rewarded; **news**, whether firms publish after the close; and **the crowd**, whether attention brings buyers at the open who sell back during the day. Finally, tickers that investors mistake for famous ones offer a natural experiment: attention without news.
+Buy an S&P 500 fund at every close and sell it at the next open: from 1998 to 2020, one dollar becomes \$4.74. Hold it only during the trading day, and it shrinks to 80 cents. So who makes money while Wall Street sleeps? We question three suspects: **risk**, whether longer nights are rewarded; **news**, whether the night gain comes from announcements made after the close; and **the crowd**, investors who rush into stocks that get attention, whether it pushes prices up overnight. But news and the crowd often come together, so they are hard to separate. We therefore use a natural experiment: tickers that investors mistake for famous ones receive the crowd's attention without any news of their own.
 
 ## Research Questions
 
@@ -54,7 +54,7 @@ A spike is a day with volume above three times its previous 20-day mean. An **ev
 
 ### Proof (Part VI)
 
-A stock mistaken for a famous company is assumed to have no news of its own, so its overnight gain points to the crowd. Matching tickers to company names gives 94 candidates; we study `FORD` (Forward Industries) after the spikes of `F` (Ford Motor), against a **placebo** of the 100 stocks closest in size to `F`.
+A stock mistaken for a famous company has no news of its own, so an overnight gain after that company's spikes points to the crowd. The famous case `ZOOM` / `ZM` is absent from our data, so we study a similar one, `FORD` (Forward Industries) and `F` (Ford Motor), against a **placebo** of 100 similar-size stocks.
 
 ### Limitations
 
@@ -82,7 +82,6 @@ Each member carries out the P3 next steps of their part (see the notebook):
 - Ismail: news (Part IV).
 - Rania: crowd and Google Trends (Part V).
 - Majd: proof (Part VI) and code review.
-- Everyone: the data story section of their part.
 
 ## Questions for TAs
 
