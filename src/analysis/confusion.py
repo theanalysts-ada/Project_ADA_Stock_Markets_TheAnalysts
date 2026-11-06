@@ -11,77 +11,81 @@ from src.data.quality import FILTERS, flag_suspicious
 from src.features.returns import add_dollar_volume, add_returns
 from src.features.volume import abnormal_volume
 
-# Legal and security-type words of a Nasdaq security name: they carry no brand meaning.
+# Words of a security name that say nothing about the brand (legal terms, type of security...)
 IGNORED_WORDS = {
     "common", "stock", "shares", "share", "class", "ordinary", "inc", "incorporated", "corp", "corporation",
     "company", "limited", "ltd", "holdings", "holding", "group", "trust", "fund", "etf", "units", "series",
     "preferred", "depositary", "receipts", "warrants", "rights", "notes", "issued", "distribution", "when",
     "with", "new", "the", "and", "for", "from",
 }
-# Flags removed from the returns of a pair. The liquidity filter of Part V would remove the small stocks studied
-# here, so we use the light filter of Part I plus the flag of a stale open (the open is the previous close, which
-# makes the overnight return wrong).
-PAIR_FLAGS = FILTERS["light"] + ["open_equals_prev_close"]
-# A ticker that traded every market day, used to build the calendar of the returns of a few tickers.
-CALENDAR_TICKER = "SPY"
-# Words that reveal a secondary security of a company (its preferred shares, notes, units...), not its main stock.
+
+# Words showing that a security is not the main stock of a company (preferred shares, notes...)
 SECONDARY_WORDS = {
     "preferred", "pfd", "depositary", "notes", "unit", "units", "warrant", "warrants", "rights", "debentures",
     "subordinated", "senior", "due",
 }
 
+# Flags used for the pairs. The liquidity filter would remove the small stocks we study, so we use
+# the light filter plus the stale-open flag (open = previous close makes the overnight return wrong).
+PAIR_FLAGS = FILTERS["light"] + ["open_equals_prev_close"]
 
-def ticker_coverage(prices: pd.DataFrame) -> pd.DataFrame:
-    """Find the first and last observation of each ticker.
+# A ticker that traded every market day
+CALENDAR_TICKER = "SPY"
+
+
+def ticker_coverage(prices):
+    """First day, last day and number of days of each ticker.
 
     Args:
-        prices: Table from load_prices, with at least ticker and date.
+        prices: Prices with ticker and date.
 
     Returns:
-        One row per ticker: first_date, last_date and n_days (number of observed days).
+        One row per ticker: first_date, last_date and n_days.
     """
-    grouped = prices.groupby("ticker", observed=True)["date"]
-    coverage = grouped.agg(first_date="min", last_date="max", n_days="size")
+    coverage = prices.groupby("ticker", observed=True)["date"].agg(first_date="min", last_date="max", n_days="size")
     coverage.index = coverage.index.astype(str)
     return coverage
 
 
-def one_letter_pairs(tickers: list[str]) -> pd.DataFrame:
-    """List every pair of tickers whose edit distance is exactly 1.
-
-    The edit distance (Levenshtein) is the minimum number of single-letter replacements,
-    insertions or deletions needed to turn one ticker into the other. Each pair appears once,
-    with ticker_a before ticker_b in alphabetical order.
+def one_letter_pairs(tickers):
+    """All pairs of tickers at edit distance 1 (one letter replaced, added or removed).
 
     Args:
-        tickers: Ticker symbols; duplicates are ignored.
+        tickers: List of tickers.
 
     Returns:
-        One row per pair: ticker_a, ticker_b and edit ("substitution" when both tickers have the
-        same length, "insertion/deletion" otherwise).
+        One row per pair: ticker_a, ticker_b (in alphabetical order) and the type of edit.
     """
     names = sorted(set(tickers))
+
+    # Edit distance between every pair of tickers (anything above 1 is stored as 2)
     distance = process.cdist(names, names, scorer=Levenshtein.distance, dtype=np.uint8, score_cutoff=1, workers=-1)
+
+    # Positions where the distance is 1. np.triu keeps the upper half of the matrix,
+    # so that each pair appears once (A-B but not B-A) and a ticker is not paired with itself.
     rows, cols = np.nonzero(np.triu(distance == 1, k=1))
-    lengths = np.array([len(name) for name in names])
-    return pd.DataFrame({
-        "ticker_a": np.array(names, dtype=object)[rows],
-        "ticker_b": np.array(names, dtype=object)[cols],
-        "edit": np.where(lengths[rows] == lengths[cols], "substitution", "insertion/deletion"),
+
+    pairs = pd.DataFrame({
+        "ticker_a": [names[i] for i in rows],
+        "ticker_b": [names[j] for j in cols],
     })
+    # Same length: one letter was replaced. Different length: one letter was added or removed.
+    same_length = pairs["ticker_a"].str.len() == pairs["ticker_b"].str.len()
+    pairs["edit"] = np.where(same_length, "substitution", "insertion/deletion")
+    return pairs
 
 
-def pair_summary(pairs: pd.DataFrame, n_tickers: int) -> pd.Series:
-    """Count the pairs and the tickers that have at least one neighbour at distance 1.
+def pair_summary(pairs, n_tickers):
+    """Number of pairs, and of tickers that have at least one neighbour at distance 1.
 
     Args:
-        pairs: Table returned by one_letter_pairs.
-        n_tickers: Number of tickers that were compared.
+        pairs: Output of one_letter_pairs.
+        n_tickers: Number of tickers compared.
 
     Returns:
-        Number of pairs (total and by type of edit), tickers involved, and their share of all tickers (%).
+        The counts, and the share of tickers involved (%).
     """
-    involved = pd.unique(pairs[["ticker_a", "ticker_b"]].to_numpy().ravel()).size
+    involved = len(set(pairs["ticker_a"]) | set(pairs["ticker_b"]))
     return pd.Series({
         "pairs": len(pairs),
         "substitutions": int((pairs["edit"] == "substitution").sum()),
@@ -91,76 +95,89 @@ def pair_summary(pairs: pd.DataFrame, n_tickers: int) -> pd.Series:
     }, dtype="object")
 
 
-def _tokens(security_name: str) -> list[str]:
-    """Split a security name into lower-case words, without punctuation."""
+def pairs_by_min_length(pairs):
+    """Number of pairs by the length of the shorter ticker.
+
+    Args:
+        pairs: Output of one_letter_pairs.
+
+    Returns:
+        Number of pairs for each length.
+    """
+    shorter = np.minimum(pairs["ticker_a"].str.len(), pairs["ticker_b"].str.len())
+    counts = shorter.value_counts().sort_index()
+    counts.name = "pairs"
+    counts.index.name = "letters in the shorter ticker"
+    return counts
+
+
+def _tokens(security_name):
+    """Words of a name in lower case: everything that is not a letter or a digit becomes a space."""
     return re.sub(r"[^a-z0-9]+", " ", security_name.lower()).split()
 
 
-def name_words(security_name: str, min_length: int = 4) -> set[str]:
-    """Extract the distinctive words of a security name, in lower case.
-
-    Args:
-        security_name: Name as written in the metadata, e.g. "Alpha Video Systems, Inc. - Common Stock".
-        min_length: Words shorter than this are dropped, because short strings match by chance.
-
-    Returns:
-        The set of words, without punctuation, legal terms (Inc, Corp, Common Stock...) or short words.
-    """
-    return {word for word in _tokens(security_name) if len(word) >= min_length and word not in IGNORED_WORDS}
+def name_words(security_name, min_length=4):
+    """Distinctive words of a security name: no legal terms and no word shorter than min_length."""
+    words = set()
+    for word in _tokens(security_name):
+        if len(word) >= min_length and word not in IGNORED_WORDS:
+            words.add(word)
+    return words
 
 
-def is_secondary_security(security_name: str) -> bool:
-    """Tell whether a security is a secondary product of a company (preferred shares, notes, units...)."""
-    return any(word in SECONDARY_WORDS for word in _tokens(security_name))
+def is_secondary_security(security_name):
+    """True if the security is not the main stock of a company (preferred shares, notes, units...)."""
+    for word in _tokens(security_name):
+        if word in SECONDARY_WORDS:
+            return True
+    return False
 
 
-def first_word(security_name: str) -> str:
-    """Return the first word of a security name, in lower case (the brand of a fund family, e.g. "alpha")."""
+def first_word(security_name):
+    """First word of a name, in lower case (for ETFs, the name of the fund family)."""
     tokens = _tokens(security_name)
-    return tokens[0] if tokens else ""
+    if len(tokens) == 0:
+        return ""
+    return tokens[0]
 
 
-def ticker_name_matches(
-    meta: pd.DataFrame,
-    coverage: pd.DataFrame,
-    max_distance: int = 0,
-    min_length: int = 4,
-    min_overlap_days: int = 90,
-    max_owners: int = 3,
-    ordinary_only: bool = True,
-    drop_fund_families: bool = True,
-) -> pd.DataFrame:
-    """Find tickers that look like a word of another company's name.
-
-    This is the mechanism of a mix-up: an investor who wants the company called "Alpha" searches for
-    "Alpha" and buys the unrelated security whose ticker is ALPHA. A company is never matched to its own name.
+def ticker_name_matches(meta, coverage, max_distance=0, min_length=4, min_overlap_days=90, max_owners=3,
+                        ordinary_only=True, drop_fund_families=True):
+    """Tickers that look like a word of another company's name (ticker ALPHA, company "Alpha Video").
 
     Args:
-        meta: Table returned by load_metadata, with ticker, security_name and is_etf.
-        coverage: Table returned by ticker_coverage.
-        max_distance: Largest edit distance between the ticker and the word (0 means identical).
-        min_length: Minimum length of the ticker and of the words, because short strings match by chance.
-        min_overlap_days: Minimum common period of the two securities, in calendar days. The two must be
-            traded at the same time for one to be mistaken for the other.
-        max_owners: A word that appears in the names of more companies than this is a common word, not a brand.
-        ordinary_only: If True, a name is searched only in the main security of a company, not in its
-            preferred shares, notes, units or warrants (which belong to a company that is already listed).
-        drop_fund_families: If True, drop the matches between two ETFs whose names start with the same word
-            (the same fund family).
+        meta: Metadata with ticker, security_name and is_etf.
+        coverage: Output of ticker_coverage.
+        max_distance: Max edit distance between ticker and word (0 = identical).
+        min_length: Min length of tickers and words.
+        min_overlap_days: Min days the two were listed at the same time.
+        max_owners: A word in more company names than this is too common.
+        ordinary_only: Only use the names of main stocks (no preferred shares, notes...).
+        drop_fund_families: Drop pairs of ETFs from the same fund family.
 
     Returns:
-        One row per match: ticker, ticker_name, word, distance, owner (the company whose name contains the
-        word), owner_name and overlap_days.
+        One row per match: ticker, ticker_name, word, distance, owner, owner_name, overlap_days.
     """
-    listed = meta[meta["ticker"].isin(coverage.index)].drop_duplicates("ticker")
-    names = listed.set_index("ticker")["security_name"].fillna("")
-    is_etf = listed.set_index("ticker")["is_etf"]
-    searched = [ticker for ticker, name in names.items() if not (ordinary_only and is_secondary_security(name))]
-    owners = pd.DataFrame(
-        [(word, ticker) for ticker in searched for word in name_words(names[ticker], min_length)],
-        columns=["word", "owner"],
-    )
-    owners = owners[owners["word"].map(owners.groupby("word")["owner"].nunique()) <= max_owners]
+    # 1. Name and ETF flag of every ticker that has prices
+    listed = meta[meta["ticker"].isin(coverage.index)].drop_duplicates("ticker").set_index("ticker")
+    names = listed["security_name"].fillna("")
+    is_etf = listed["is_etf"]
+
+    # 2. Words of each company name, with the company that "owns" them
+    owner_rows = []
+    for ticker, name in names.items():
+        if ordinary_only and is_secondary_security(name):
+            continue
+        for word in name_words(name, min_length):
+            owner_rows.append({"word": word, "owner": ticker})
+    owners = pd.DataFrame(owner_rows, columns=["word", "owner"])
+
+    # 3. Drop common words, found in the names of too many companies
+    n_owners = owners.groupby("word")["owner"].nunique()
+    common_words = n_owners[n_owners > max_owners].index
+    owners = owners[~owners["word"].isin(common_words)]
+
+    # 4. Edit distance between each ticker (in lower case) and each word
     tickers = [ticker for ticker in names.index if len(ticker) >= min_length]
     words = sorted(owners["word"].unique())
     distance = process.cdist(
@@ -169,83 +186,88 @@ def ticker_name_matches(
     )
     rows, cols = np.nonzero(distance <= max_distance)
     hits = pd.DataFrame({
-        "ticker": np.array(tickers, dtype=object)[rows],
-        "word": np.array(words, dtype=object)[cols],
+        "ticker": [tickers[i] for i in rows],
+        "word": [words[j] for j in cols],
         "distance": distance[rows, cols].astype(int),
     })
+
+    # 5. Add the company that owns the word, and never match a company with its own name
     hits = hits.merge(owners, on="word")
     hits = hits[hits["ticker"] != hits["owner"]].copy()
+
+    # 6. Drop two ETFs of the same fund family (two funds whose names start with the same word)
     if drop_fund_families:
-        both_etf = hits["ticker"].map(is_etf).eq(True) & hits["owner"].map(is_etf).eq(True)
-        same_brand = hits["ticker"].map(names).map(first_word) == hits["owner"].map(names).map(first_word)
-        hits = hits[~(both_etf & same_brand)].copy()
-    start = pd.concat([hits[side].map(coverage["first_date"]) for side in ("ticker", "owner")], axis=1).max(axis=1)
-    end = pd.concat([hits[side].map(coverage["last_date"]) for side in ("ticker", "owner")], axis=1).min(axis=1)
-    hits["overlap_days"] = (end - start).dt.days.clip(lower=0)
+        both_etf = (hits["ticker"].map(is_etf) == True) & (hits["owner"].map(is_etf) == True)
+        same_family = hits["ticker"].map(names).map(first_word) == hits["owner"].map(names).map(first_word)
+        hits = hits[~(both_etf & same_family)].copy()
+
+    # 7. Period when the two securities were listed at the same time
+    start = pd.concat([hits["ticker"].map(coverage["first_date"]), hits["owner"].map(coverage["first_date"])], axis=1)
+    end = pd.concat([hits["ticker"].map(coverage["last_date"]), hits["owner"].map(coverage["last_date"])], axis=1)
+    hits["overlap_days"] = (end.min(axis=1) - start.max(axis=1)).dt.days.clip(lower=0)
     hits["ticker_name"] = hits["ticker"].map(names)
     hits["owner_name"] = hits["owner"].map(names)
+
+    # 8. Keep the pairs listed together long enough
+    hits = hits[hits["overlap_days"] >= min_overlap_days]
     columns = ["ticker", "ticker_name", "word", "distance", "owner", "owner_name", "overlap_days"]
-    keep = hits["overlap_days"] >= min_overlap_days
-    return hits.loc[keep, columns].sort_values(["ticker", "owner"]).reset_index(drop=True)
+    return hits[columns].sort_values(["ticker", "owner"]).reset_index(drop=True)
 
 
-def load_pair(buzz: str, receiver: str, threshold: float = 3.0) -> pd.DataFrame:
-    """Load the prices of two tickers with the measures of Parts I and V.
-
-    The steps are those of the common sample: returns (add_returns), dollar volume, quality flags
-    (flag_suspicious) and the abnormal volume with its attention spikes (abnormal_volume). No row is removed:
-    the filters are applied afterwards by event_study, which blanks the flagged rows.
+def load_pair(buzz, receiver, threshold=3.0):
+    """Prices of two tickers with returns, quality flags and attention spikes (as in Parts I and V).
 
     Args:
-        buzz: Ticker of the well-known company, whose news may attract attention.
+        buzz: Ticker of the well-known company.
         receiver: Ticker that may be bought by mistake.
-        threshold: Abnormal volume above which a day is an attention spike.
+        threshold: Abnormal volume above which a day is a spike.
 
     Returns:
-        One row per ticker and date, with the columns of load_prices plus r_night, r_day, dollar_volume,
-        one column per quality flag, abn_volume and spike.
+        One row per ticker and date. No row is removed: event_study blanks the flagged rows later.
     """
     case = load_prices(tickers=[buzz, receiver])
     case["ticker"] = case["ticker"].astype(str)
-    return abnormal_volume(flag_suspicious(add_dollar_volume(add_returns(case))), threshold=threshold)
+    case = add_returns(case)
+    case = add_dollar_volume(case)
+    case = flag_suspicious(case)
+    case = abnormal_volume(case, threshold=threshold)
+    return case
 
 
-def twin_events(case: pd.DataFrame, buzz: str, receiver: str) -> pd.DataFrame:
-    """Rows of the receiver, flagged as events on the days when the well-known company has an attention spike.
+def twin_events(case, buzz, receiver):
+    """Rows of the receiver, where the events are the spike days of the well-known company.
 
-    The result has the format expected by event_study (Part V): day 0 is a spike day of the well-known
-    company, and day k is the k-th trading day of the receiver before or after it. A spike day on which the
-    receiver did not trade is lost.
+    The result can be passed to event_study (Part V): day 0 is a spike of the well-known company,
+    and day k is the k-th trading day of the receiver after it.
 
     Args:
-        case: Table returned by load_pair.
+        case: Output of load_pair.
         buzz: Ticker of the well-known company.
         receiver: Ticker that may be bought by mistake.
 
     Returns:
-        The rows of the receiver, whose spike column now marks the spikes of the well-known company.
+        The rows of the receiver, whose spike column now holds the spikes of the well-known company.
     """
-    spikes = case.loc[case["ticker"] == buzz].set_index("date")["spike"]
+    buzz_spikes = case[case["ticker"] == buzz].set_index("date")["spike"]
     rows = case[case["ticker"] == receiver].copy()
-    rows["spike"] = rows["date"].map(spikes).astype("boolean").fillna(False).astype(bool)
+    # Spike of the well-known company on the same date (False if it did not trade that day)
+    rows["spike"] = rows["date"].map(buzz_spikes) == True
     return rows.reset_index(drop=True)
 
 
-def case_summary(case: pd.DataFrame, buzz: str, receiver: str) -> pd.DataFrame:
-    """Describe the size and the data quality of the two tickers of a case.
+def case_summary(case, buzz, receiver):
+    """Size and data quality of the two tickers of a case.
 
     Args:
-        case: Table returned by load_pair.
+        case: Output of load_pair.
         buzz: Ticker of the well-known company.
         receiver: Ticker that may be bought by mistake.
 
     Returns:
-        One column per ticker (receiver first); rows: first and last day, number of days, median close,
-        median volume, median dollar volume, share of days without volume, and share of days whose open
-        equals the previous close or the close of the same day.
+        One column per ticker: period, size, and share of days with no volume or a stale open.
     """
     columns = {}
-    for ticker in (receiver, buzz):
+    for ticker in [receiver, buzz]:
         rows = case[case["ticker"] == ticker].sort_values("date")
         columns[ticker] = pd.Series({
             "first day": rows["date"].min().date(),
@@ -261,149 +283,111 @@ def case_summary(case: pd.DataFrame, buzz: str, receiver: str) -> pd.DataFrame:
     return pd.DataFrame(columns)
 
 
-def pairs_by_min_length(pairs: pd.DataFrame) -> pd.Series:
-    """Count the pairs by the length of the shorter ticker of the pair.
+def _spikes_on(spikes, ticker, dates):
+    """Spikes of a ticker on the given dates (False on days it did not trade)."""
+    return spikes[ticker].reindex(dates) == True
+
+
+def night_score(rows, spike, flags=None):
+    """Overnight return after the events, minus the usual overnight return. Returns (score, number of events)."""
+    if flags:
+        keep = ~rows[flags].any(axis=1)
+    else:
+        keep = pd.Series(True, index=rows.index)
+
+    night = rows["r_night"].where(keep).astype(float)
+    events = spike.to_numpy(dtype=bool) & keep.to_numpy()
+
+    # shift(-1): on each event day, look at the overnight return of the next session
+    night_after = night.shift(-1)[events].dropna()
+    score = night_after.mean() - night.mean()
+    return float(score), len(night_after)
+
+
+def placebo_pvalue(score, placebo_scores):
+    """Share of placebo scores at least as large as the observed score (one-sided p-value)."""
+    scores = np.array(placebo_scores, dtype=float)
+    scores = scores[~np.isnan(scores)]
+    n_larger = (scores >= score).sum()
+    return float((1 + n_larger) / (1 + len(scores)))
+
+
+def closest_in_size(size, pool_sizes, n):
+    """The n tickers of the pool whose size is closest to `size`, compared on a log scale."""
+    size_gap = (np.log(pool_sizes) - np.log(size)).abs()
+    return size_gap.nsmallest(n).index.tolist()
+
+
+def usual_overnight_return(case, ticker, flags=PAIR_FLAGS, start_year=STUDY_START_YEAR):
+    """Mean overnight return of a ticker over all its sessions, cleaned as in event_study.
 
     Args:
-        pairs: Table returned by one_letter_pairs.
-
-    Returns:
-        Number of pairs for each length (in letters), in increasing order of length.
-    """
-    lengths = pairs[["ticker_a", "ticker_b"]].apply(lambda column: column.str.len()).min(axis=1)
-    return lengths.value_counts().sort_index().rename("pairs").rename_axis("letters in the shorter ticker")
-
-
-def usual_overnight_return(
-    case: pd.DataFrame, ticker: str, flags: list[str] = PAIR_FLAGS, start_year: int = STUDY_START_YEAR,
-) -> float:
-    """Usual overnight return of a ticker: its mean over all its sessions, cleaned as in event_study.
-
-    Args:
-        case: Table returned by load_pair.
-        ticker: Ticker whose overnight return is averaged.
-        flags: Quality flags; the returns of a flagged row are ignored.
+        case: Output of load_pair.
+        ticker: Ticker to average.
+        flags: Quality flags; flagged rows are ignored.
         start_year: Sessions before this year are ignored.
 
     Returns:
-        The mean overnight return (a return: 0.01 is one percentage point).
+        The mean overnight return (0.01 = one percentage point).
     """
     rows = case[(case["ticker"] == ticker) & (case["date"].dt.year >= start_year)]
-    keep = ~rows[flags].any(axis=1) if flags else pd.Series(True, index=rows.index)
-    return float(rows["r_night"].where(keep).astype("float64").mean())
+    night = rows["r_night"].astype(float)
+    if flags:
+        night = night.where(~rows[flags].any(axis=1))
+    return float(night.mean())
 
 
-def _spikes_on(spikes: pd.DataFrame, ticker: str, dates: pd.Series) -> pd.Series:
-    """Spike flags of a ticker on the given dates (False where the ticker has no row)."""
-    return spikes[ticker].reindex(dates, fill_value=False).astype(bool)
-
-
-def night_score(rows: pd.DataFrame, spike: pd.Series, flags: list[str] | None = None) -> tuple[float, int]:
-    """Excess overnight return of a ticker on the session that follows its events.
-
-    This is the overnight return of day +1 of event_study (Part V), minus its mean over all the sessions of the
-    ticker. A positive score means that the ticker gains more than usual overnight after an event.
-
-    Args:
-        rows: Rows of one ticker sorted by date, with r_night and the flag columns.
-        spike: Boolean Series aligned with rows, True on event days.
-        flags: Quality flags; the returns of a flagged row are blanked and a flagged row cannot be an event.
-
-    Returns:
-        The score (a return: 0.01 is one percentage point) and the number of events with an observed overnight
-        return the next session. The score is missing when there is no such event.
-    """
-    keep = ~rows[flags].any(axis=1) if flags else pd.Series(True, index=rows.index)
-    night = rows["r_night"].where(keep).astype("float64")
-    events = spike.to_numpy(dtype=bool) & keep.to_numpy()
-    night_after = night.shift(-1)[events].dropna()
-    return float(night_after.mean() - night.mean()), len(night_after)
-
-
-def placebo_pvalue(score: float, placebo_scores: np.ndarray) -> float:
-    """One-sided empirical p-value of a score against the scores obtained with placebo companies.
-
-    Args:
-        score: Observed score.
-        placebo_scores: Score obtained with each placebo company (missing values are ignored).
-
-    Returns:
-        (1 + number of placebo scores at least as large as the observed one) / (1 + number of placebo scores).
-    """
-    scores = np.asarray(placebo_scores, dtype="float64")
-    scores = scores[~np.isnan(scores)]
-    return float((1 + (scores >= score).sum()) / (1 + len(scores)))
-
-
-def closest_in_size(size: float, pool_sizes: pd.Series, n: int) -> list[str]:
-    """Tickers of a pool whose size is the closest to a given size, on a log scale.
-
-    Args:
-        size: Reference size (here a median dollar volume).
-        pool_sizes: Size of each ticker of the pool.
-        n: Number of tickers kept.
-
-    Returns:
-        The n closest tickers.
-    """
-    distance = (np.log(pool_sizes) - np.log(size)).abs()
-    return distance.nsmallest(n).index.tolist()
-
-
-def pair_placebo_test(
-    receiver: str,
-    buzz: str,
-    flags: list[str] = PAIR_FLAGS,
-    n_placebos: int = 100,
-    min_pool_dollar: float = 1e7,
-    min_pool_days: int = 2000,
-    start_year: int = STUDY_START_YEAR,
-) -> dict:
-    """Test the overnight gain of a receiver after the spikes of its well-known company, against placebos.
-
-    The score of night_score is computed with the spikes of the well-known company, then with the spikes of each
-    placebo company: the n_placebos liquid stocks whose size (median dollar volume) is the closest to that of the
-    well-known company, the receiver and the well-known company excepted.
+def pair_placebo_test(receiver, buzz, flags=PAIR_FLAGS, n_placebos=100, min_pool_dollar=1e7, min_pool_days=2000,
+                      start_year=STUDY_START_YEAR):
+    """Does the receiver gain more overnight after the spikes of its well-known company than after the spikes
+    of companies of similar size (placebos)?
 
     Args:
         receiver: Ticker that may be bought by mistake.
         buzz: Ticker of the well-known company.
-        flags: Quality flags blanked in the returns of the receiver.
+        flags: Quality flags removed from the receiver's returns.
         n_placebos: Number of placebo companies.
-        min_pool_dollar: Minimum median dollar volume of a placebo company.
-        min_pool_days: Minimum number of trading days of a placebo company.
-        start_year: Events and returns before this year are ignored, as in event_study (Part V).
+        min_pool_dollar, min_pool_days: Min median dollar volume and min days of a placebo company.
+        start_year: Data before this year is ignored.
 
     Returns:
-        A dict with the score and the number of events of the well-known company, the score obtained with each
-        placebo company (placebo_scores, in the order of their closeness in size), the one-sided p-value (p) and the
-        size of each placebo company (placebos).
+        A dict with score, n_events, placebo_scores (closest in size first), p and placebos (their sizes).
     """
+    # 1. Rows of the receiver, with returns and quality flags
     prices = load_prices(tickers=[receiver, CALENDAR_TICKER])
     prices["ticker"] = prices["ticker"].astype(str)
     prices = flag_suspicious(add_dollar_volume(add_returns(prices)))
-    prices = prices[(prices["ticker"] == receiver) & (prices["date"].dt.year >= start_year)]
-    rows = prices.sort_values("date").reset_index(drop=True)
+    rows = prices[(prices["ticker"] == receiver) & (prices["date"].dt.year >= start_year)]
+    rows = rows.sort_values("date").reset_index(drop=True)
 
+    # 2. Size (median dollar volume), number of days and type of every ticker
     volume = load_prices(columns=["ticker", "date", "close", "volume", "asset_type"])
-    volume = volume[volume["date"].dt.year >= start_year]
-    volume["dollar"] = volume["close"].astype("float64") * volume["volume"].astype("float64")
+    volume = volume[volume["date"].dt.year >= start_year].copy()
+    volume["dollar"] = volume["close"].astype(float) * volume["volume"].astype(float)
     by_ticker = volume.groupby("ticker", observed=True)
     sizes = by_ticker["dollar"].median()
     sizes.index = sizes.index.astype(str)
     days = by_ticker["dollar"].size().set_axis(sizes.index)
-    is_stock = by_ticker["asset_type"].first().set_axis(sizes.index).eq("stock")
-    eligible = sizes[(sizes >= min_pool_dollar) & (days >= min_pool_days) & is_stock]
+    is_stock = (by_ticker["asset_type"].first() == "stock").set_axis(sizes.index)
     if buzz not in sizes.index:
-        raise ValueError(f"{buzz} has no volume data.")
-    placebos = closest_in_size(sizes[buzz], eligible.drop([receiver, buzz], errors="ignore"), n_placebos)
-    wanted = set(placebos) | {buzz}
-    spikes = abnormal_volume(volume[volume["ticker"].isin(wanted)].assign(ticker=lambda d: d["ticker"].astype(str)))
-    spikes = spikes.pivot(index="date", columns="ticker", values="spike")
+        raise ValueError(buzz + " has no volume data.")
 
+    # 3. Placebos: the liquid stocks closest in size to the well-known company
+    eligible = sizes[(sizes >= min_pool_dollar) & (days >= min_pool_days) & is_stock]
+    placebos = closest_in_size(sizes[buzz], eligible.drop([receiver, buzz], errors="ignore"), n_placebos)
+
+    # 4. Attention spikes of the well-known company and of the placebos: one column per ticker
+    subset = volume[volume["ticker"].isin(set(placebos) | {buzz})].copy()
+    subset["ticker"] = subset["ticker"].astype(str)
+    spikes = abnormal_volume(subset).pivot(index="date", columns="ticker", values="spike")
+
+    # 5. Score with the real spikes, then with the spikes of each placebo
     score, n_events = night_score(rows, _spikes_on(spikes, buzz, rows["date"]), flags)
-    placebo_scores = np.array([night_score(rows, _spikes_on(spikes, t, rows["date"]), flags)[0] for t in placebos])
-    return {
-        "score": score, "n_events": n_events, "placebo_scores": placebo_scores,
-        "p": placebo_pvalue(score, placebo_scores), "placebos": sizes.reindex(placebos),
-    }
+    placebo_scores = []
+    for placebo in placebos:
+        placebo_score, _ = night_score(rows, _spikes_on(spikes, placebo, rows["date"]), flags)
+        placebo_scores.append(placebo_score)
+    placebo_scores = np.array(placebo_scores)
+
+    return {"score": score, "n_events": n_events, "placebo_scores": placebo_scores,
+            "p": placebo_pvalue(score, placebo_scores), "placebos": sizes.reindex(placebos)}
