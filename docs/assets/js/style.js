@@ -31,7 +31,7 @@ window.NightHeist = window.NightHeist || {};
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { family: 'Inter, system-ui, sans-serif', size: 14, color: NH.colors.ink },
       margin: { l: 16, r: 16, t: 16, b: 16 },
-      hoverlabel: { font: { family: 'IBM Plex Mono, monospace', size: 13 } },
+      hoverlabel: { bgcolor: '#0E1628', bordercolor: NH.colors.neutral, font: { family: 'IBM Plex Mono, monospace', size: 13, color: NH.colors.ink } },
       legend: { orientation: 'h', x: 0, y: 1.12 },
       ...extra,
       xaxis: { ...axis, ...(extra.xaxis || {}) },

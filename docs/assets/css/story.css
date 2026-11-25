@@ -42,11 +42,13 @@ body {
 }
 
 /* Dusk at the top, deep night through the investigation, dawn at the verdict. */
+/* The stops after the night are moved by night.js so that full dawn starts at the verdict. */
 .page {
   min-height: 100vh;
   background: linear-gradient(180deg,
     #3A2C4A 0%, #1B1F3A 5%, #0E1628 10%, #0A0F1C 20%,
-    #0E1628 62%, #1E2238 72%, #3B3350 82%, #8A6450 92%, #C98B4E 100%);
+    #0E1628 var(--dusk-end, 62%), #1E2238 var(--stopped, 72%), #3B3350 var(--twilight, 82%),
+    #8A6450 var(--sunrise, 92%), #C98B4E var(--dawn, 100%));
 }
 
 main, .site-header, .site-footer {
@@ -329,17 +331,6 @@ p { margin: 0; }
 .paper-box label { font-size: 17px; font-weight: 600; }
 .paper-box input[type="range"] { width: 100%; accent-color: var(--day-ink); }
 .paper-box .small { font-size: 14px; color: var(--paper-label); }
-
-/* Scroll-linked sky: the colour follows the section being read (set by night.js). */
-body.js-sky { position: relative; z-index: 0; }
-body.js-sky::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background: linear-gradient(180deg, var(--sky, #0A0F1C) 0%, var(--sky-2, #0A0F1C) 100%);
-}
-body.js-sky .page { background: none; }
 
 .sr-only {
   position: absolute;

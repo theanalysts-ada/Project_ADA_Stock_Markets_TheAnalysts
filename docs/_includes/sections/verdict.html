@@ -1,8 +1,9 @@
 {% comment %} 8 · The verdict (09:30). The cost result and the ruling come with the verdict chapter. {% endcomment %}
-<section class="chapter verdict" id="verdict" data-clock="09:30" data-sky="#C98B4E" aria-labelledby="verdict-title">
+<section class="chapter verdict" id="verdict" data-clock="09:30" aria-labelledby="verdict-title">
   <p class="clock">09:30 · The market opens · The verdict</p>
   <h2 id="verdict-title">The verdict</h2>
-  <p class="prose">The suspects board returns. Each red thread ties a piece of evidence to the suspect it points to; the stamps show where each interrogation ended.</p>
+  <p class="exhibit-label">Evidence board · Who did it?</p>
+  <p class="prose">All the evidence, pinned on one board. A red thread ties a piece of evidence to the suspect it points to, and each stamp shows where the interrogation ended. For now, the threads only show the leads found at the crime scene; the interrogations will add the rest. Click a card to go back to it.</p>
   <div class="board board--verdict" id="verdict-board" data-threads='{{ site.data.verdicts.threads | jsonify }}'>
     <svg class="threads" aria-hidden="true"></svg>
     <a class="pinned" data-card="exhibit-a" href="#chart-spy"><span class="paper-label">Exhibit A</span>SPY: the night earns, the day loses</a>

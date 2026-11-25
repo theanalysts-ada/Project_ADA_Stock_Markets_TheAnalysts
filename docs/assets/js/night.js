@@ -1,5 +1,5 @@
-/* Scroll effects: the dusk-to-dawn sky, the investigator's clock, the mini suspects board
-   and the red threads of the verdict board. Without JavaScript the page keeps its static gradient. */
+/* Night effects: dawn placed at the verdict, the investigator's clock, the mini suspects board
+   and the red threads of the verdict board. Without JavaScript the page keeps its default gradient. */
 (function (NH) {
   const sections = Array.from(document.querySelectorAll('[data-clock]'));
   const clock = document.querySelector('.clock-face .time');
@@ -17,9 +17,6 @@
     previous = t;
     return t;
   });
-  const colors = sections.map((s) => s.dataset.sky.match(/\w\w/g).map((h) => parseInt(h, 16)));
-
-  const mix = (a, b, t) => 'rgb(' + a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',') + ')';
   const pad = (n) => String(n).padStart(2, '0');
 
   /* Where the reader is: index of the current section and progress (0-1) towards the next one. */
@@ -35,8 +32,6 @@
   function update() {
     const { i, t } = position();
     const j = Math.min(i + 1, sections.length - 1);
-    document.body.style.setProperty('--sky', mix(colors[i], colors[j], t));
-    document.body.style.setProperty('--sky-2', mix(colors[i], colors[j], Math.min(1, t + 0.5)));
     if (clock) {
       const minutes = Math.round((times[i] + (times[j] - times[i]) * t) / 5) * 5 % 1440;
       clock.textContent = pad(Math.floor(minutes / 60)) + ':' + pad(minutes % 60);
@@ -57,10 +52,25 @@
     queued = true;
     requestAnimationFrame(() => { queued = false; update(); });
   };
-  document.body.classList.add('js-sky');
   window.addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', onScroll);
   update();
+
+  /* Same colours as the default gradient, but the dawn starts where the verdict starts,
+     whatever the length of the chapters above it. */
+  const page = document.querySelector('.page');
+  const stopped = document.getElementById('stopped');
+  const verdict = document.getElementById('verdict');
+  function placeDawn() {
+    if (!page || !stopped || !verdict) return;
+    const top = (el) => el.getBoundingClientRect().top - page.getBoundingClientRect().top;
+    const s = top(stopped);
+    const v = top(verdict);
+    const stops = { '--dusk-end': s - 300, '--stopped': s, '--twilight': (s + v) / 2, '--sunrise': v - 120, '--dawn': v + 60 };
+    Object.entries(stops).forEach(([name, px]) => page.style.setProperty(name, Math.max(0, px) + 'px'));
+  }
+  placeDawn();
+  new ResizeObserver(placeDawn).observe(document.body);
 
   /* Red threads between pinned cards, drawn when the board comes into view. */
   const board = document.getElementById('verdict-board');
