@@ -1,0 +1,17 @@
+{% comment %} 1 · The bet (16:00). Numbers come from _data/crime.json, written by scripts/export_story_data.py. {% endcomment %}
+{% assign f = site.data.crime %}
+<section class="chapter" id="bet" aria-labelledby="bet-title">
+  <p class="clock clock--dusk">16:00 · New York · The market closes</p>
+  <h1 id="bet-title">Who makes money while Wall Street sleeps?</h1>
+  <p class="lead">Every evening the market closes. Every morning it reopens at a new price. Somewhere in between, money moves. You have one dollar and 22 years. Where do you put it?</p>
+  <div class="btn-row" id="bet-buttons">
+    <button type="button" class="btn btn--big btn--night" data-choice="night" aria-pressed="false">Hold it only at night</button>
+    <button type="button" class="btn btn--big btn--day" data-choice="day" aria-pressed="false">Hold it only during the day</button>
+  </div>
+  <div class="bet-result" id="bet-result" hidden aria-live="polite">
+    <p id="bet-text"
+       data-night="Good instinct. Held only overnight, your dollar became <span class='night'>${{ f.spy.night }}</span>. Held only during the day, it would have shrunk to <span class='day'>${{ f.spy.day }}</span>."
+       data-day="Surprised? Held only during the day, your dollar shrank to <span class='day'>${{ f.spy.day }}</span>. Held only overnight, it became <span class='night'>${{ f.spy.night }}</span>."></p>
+    <span class="source">SPY · {{ f.first_date | slice: 0, 4 }}–{{ f.last_date | slice: 0, 4 }}</span>
+  </div>
+</section>

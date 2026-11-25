@@ -1,0 +1,12 @@
+{% comment %}
+Titled chart block. The chart is drawn by JavaScript into the div with id = include.id.
+Parameters: id, label, title, aria (text read by screen readers), height (px, default 380), caption (optional).
+{% endcomment %}
+<figure class="exhibit">
+  <p class="exhibit-label">{{ include.label }}</p>
+  <h3>{{ include.title }}</h3>
+  <div class="chart" id="{{ include.id }}" role="img" aria-label="{{ include.aria | escape }}" style="min-height: {{ include.height | default: 380 }}px">
+    <noscript><p class="chart-fallback">This chart needs JavaScript.</p></noscript>
+  </div>
+  {% if include.caption %}<figcaption>{{ include.caption }}</figcaption>{% endif %}
+</figure>

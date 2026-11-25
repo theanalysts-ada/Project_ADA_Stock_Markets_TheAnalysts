@@ -1,0 +1,9 @@
+{% comment %}
+Small paper card with the value of $1 held only at night and only during the day.
+Parameters: tag, name, night, day (numbers, without the $ sign).
+{% endcomment %}
+<div class="case-card">
+  <p class="paper-label">{{ include.tag }}</p>
+  <p class="name">{{ include.name }}</p>
+  <p class="pair"><span class="n">Night ${{ include.night }}</span><span class="d">Day ${{ include.day }}</span></p>
+</div>

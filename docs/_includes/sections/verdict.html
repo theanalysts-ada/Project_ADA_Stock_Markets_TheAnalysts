@@ -1,0 +1,17 @@
+{% comment %} 8 · The verdict (09:30). The cost result and the ruling come with the verdict chapter. {% endcomment %}
+<section class="chapter verdict" id="verdict" aria-labelledby="verdict-title">
+  <p class="clock">09:30 · The market opens · The verdict</p>
+  <h2 id="verdict-title">The verdict</h2>
+  {% include placeholder.html text="[The suspects board returns: every stamp filled, the exhibits pinned and tied by red threads, the cold case still open.]" height=180 %}
+  <div class="paper-box">
+    <p class="callback" id="verdict-callback"
+       data-none="Did the night really pay? Here is what it leaves after trading costs."
+       data-night="You bet on the night. Here is what it would have left you after costs."
+       data-day="You bet on the day. The night would have paid. But after costs?">Did the night really pay? Here is what it leaves after trading costs.</p>
+    <label for="cost">Trading cost per round trip: <span id="cost-label">2 bp</span></label>
+    <input id="cost" type="range" min="0" max="20" step="1" value="2" aria-describedby="cost-help">
+    <p id="cost-help" class="small">One basis point (bp) is 0.01% of the amount traded. A night-only investor buys at every close and sells at every open.</p>
+    <p>Your night dollar after costs: <strong>[computed in the verdict]</strong></p>
+    <p class="small">[Then the selective strategy (machine learning) and the final ruling.]</p>
+  </div>
+</section>

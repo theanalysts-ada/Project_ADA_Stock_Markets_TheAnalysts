@@ -1,0 +1,83 @@
+{% comment %}
+2 · The crime scene (18:00), notebook Part II. Owner: Sara.
+Every number comes from _data/crime.json and every chart from assets/data/crime/*.json,
+both written by scripts/export_story_data.py from the notebook pipeline.
+{% endcomment %}
+{% assign f = site.data.crime %}
+{% assign spy = f.intervals[0] %}
+{% assign ew = f.intervals[1] %}
+<section class="chapter" id="scene" aria-labelledby="scene-title">
+  <p class="clock">18:00 · The crime scene</p>
+  <h2 id="scene-title">First, the facts.</h2>
+
+  {% include exhibit.html id="chart-spy" label="Exhibit A · What happened?"
+     title="SPY, 1998–2020: the night earns, the day loses"
+     aria="Line chart, log scale: value of one dollar invested in SPY from 1998 to 2020, held only at night, only during the day, or all the time."
+     caption="Value of $1 invested in SPY, the largest US stock-market fund, held only overnight (close to next open), only during the trading day (open to close), or all the time. Log scale. Click a legend item to hide a line." %}
+  <div class="big-stat">
+    <p class="value">{{ f.spy.night_share }}%</p>
+    <p>of SPY's total return was earned at night. More than all of it: over 22 years, the trading day lost money. One dollar became <span class="night">${{ f.spy.night }}</span> at night, <span class="day">${{ f.spy.day }}</span> during the day, and ${{ f.spy.hold }} held all the time.</p>
+  </div>
+
+  <div class="exhibit">
+    <p class="exhibit-label">Exhibit B · 19:00 · An isolated case?</p>
+    <h3>The same crime, everywhere we looked</h3>
+    <div class="cards">
+      {% for c in f.cases %}
+        {% capture tag %}Case {{ forloop.index }}{% endcapture %}
+        {% include case-card.html tag=tag name=c.name night=c.night day=c.day %}
+      {% endfor %}
+    </div>
+    <div class="split">
+      <div class="main">
+        <div class="btn-row" role="group" aria-label="Show stocks or ETFs">
+          <button type="button" class="btn" data-asset="stocks" aria-pressed="true">Stocks</button>
+          <button type="button" class="btn" data-asset="etfs" aria-pressed="false">ETFs</button>
+        </div>
+        <div class="chart" id="chart-gaps" role="img" style="min-height: 300px"
+             aria-label="Histogram of the annualised night minus day gap of each ticker."></div>
+        <p class="prose" id="gaps-text" aria-live="polite"
+           data-stocks="The night beats the day for {{ f.tickers.stocks_ahead }}% of the {{ f.tickers.stocks }} stocks with at least one year of data."
+           data-etfs="The night beats the day for {{ f.tickers.etfs_ahead }}% of the {{ f.tickers.etfs }} ETFs with at least one year of data.">The night beats the day for {{ f.tickers.stocks_ahead }}% of the {{ f.tickers.stocks }} stocks with at least one year of data.</p>
+      </div>
+      <div class="side lookup">
+        <label for="ticker-input">Investigate your stock</label>
+        <input id="ticker-input" type="text" autocomplete="off" spellcheck="false" placeholder="Type a ticker, e.g. AAPL">
+        <div class="result" id="ticker-result" aria-live="polite">
+          <p>See the night and day record of any stock or ETF in our sample. One stock is noisy: the crime is a fact about portfolios, not about every single name.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% include exhibit.html id="chart-covid" label="Exhibit C · 20:00 · The night of the crash"
+     title="February–March 2020: the crash happened at night" height=320
+     aria="Line chart: value of one dollar in SPY from 3 February to 1 April 2020, held only at night or only during the day." %}
+  <div class="btn-row"><button type="button" class="btn" id="covid-replay">Replay</button></div>
+  <p class="prose">Over the COVID crash, one dollar in SPY held only at night fell to <span class="night">${{ f.covid.night }}</span>. Held only during the day, it ended at <span class="day">${{ f.covid.day }}</span>.</p>
+
+  <div class="exhibit">
+    <p class="exhibit-label">Exhibit D · 21:00 · Crime or chance?</p>
+    <h3>Annualised night − day gap, with its 95% interval</h3>
+    <div class="btn-row"><button type="button" class="btn btn--stamp" id="dividends-toggle" aria-pressed="false">Remove the dividends</button></div>
+    <div class="chart" id="chart-intervals" role="img" style="min-height: 340px"
+         aria-label="Forest plot: annualised night minus day gap and its 95% interval for SPY and four portfolios, with or without dividends."></div>
+    <p class="prose" id="intervals-with" aria-live="polite">Every interval excludes zero. SPY's comes closest: its lower bound is {{ spy.with.lo }}% a year. Now remove the dividends.</p>
+    <p class="prose" id="intervals-without" hidden aria-live="polite">Dividends land at night: on the day a stock goes ex-dividend, its price drops at the open, and the dividend is counted in the overnight return. Without them, SPY ({{ spy.without.est }}%) and equal-weighted stocks ({{ ew.without.est }}%) can no longer be told apart from zero. Part of the loot was a mechanical effect, not a mystery. But not all of it: heavily traded stocks and ETFs keep a clear gap.</p>
+    {% capture note %}Main test: a 21-day block bootstrap of the daily night − day gap, fixed on {{ f.main_test_date }}, after the feedback on our first results. Each interval covers the middle 95% of the mean gap over 1,000 resampled histories.{% endcapture %}
+    {% include margin-note.html text=note %}
+  </div>
+
+  <div class="report">
+    <p class="paper-label">Police report · Facts established</p>
+    <ol>
+      <li>The crime is real and robust for large, heavily traded stocks and for ETFs.</li>
+      <li>For SPY and equal-weighted stocks it is real but fragile: dividends explain {{ f.dividend_share.spy }}% of SPY's gap and {{ f.dividend_share.stocks_ew }}% of the equal-weighted stock gap.</li>
+      <li>Victim profile: the most traded fifth of stocks shows the largest gap, {{ f.q5.est }}% a year [{{ f.q5.lo }}; {{ f.q5.hi }}]. These stocks tend to draw the most news and attention: a lead for the suspects.</li>
+    </ol>
+    {% capture lab %}We started from {{ f.sample.tickers }} tickers and kept {{ f.sample.stocks }} stocks and {{ f.sample.etfs }} ETFs, from {{ f.first_date | slice: 0, 4 }} to {{ f.last_date | slice: 0, 4 }}: a liquidity filter that only uses the previous day, corrected data errors, and no foreign, leveraged or inverse funds. Main test: a 21-day block bootstrap of the daily night − day gap; check: a regression with errors clustered by date. The portfolio results hold with 5- and 63-day blocks, without extreme days, without 2008 and 2020, and without volatility and commodity funds. SPY is the borderline case.{% endcapture %}
+    {% include forensics-box.html text=lab section="Part II" %}
+  </div>
+
+  <p class="closing">So who did it?</p>
+</section>

@@ -377,6 +377,19 @@ def outside_crises(pair: pd.DataFrame) -> pd.DataFrame:
     return pair.loc[~crisis]
 
 
+def without_dividends(df: pd.DataFrame) -> pd.DataFrame:
+    """Columns needed by make_books, with the overnight return taken without dividends.
+
+    Args:
+        df: Study sample, with r_night_price (from add_price_night).
+
+    Returns:
+        ticker, date, asset_type, r_night (= r_night_price), r_day and dollar_volume.
+    """
+    columns = ["ticker", "date", "asset_type", "r_night_price", "r_day", "dollar_volume"]
+    return df[columns].rename(columns={"r_night_price": "r_night"})
+
+
 def gap_robustness(
     books: dict[str, pd.DataFrame], study: pd.DataFrame, excluded_etfs: pd.Series, unlinked: pd.Series,
 ) -> pd.DataFrame:
@@ -396,8 +409,7 @@ def gap_robustness(
     Returns:
         One row per book, one column per check; each cell reads "gap [low, high]" in %.
     """
-    columns = ["ticker", "date", "asset_type", "r_night_price", "r_day", "dollar_volume"]
-    no_dividend = study[columns].rename(columns={"r_night_price": "r_night"})
+    no_dividend = without_dividends(study)
     checks = {
         "main (21-day blocks)": gap_bootstrap(books),
         "5-day blocks": gap_bootstrap(books, block=5),

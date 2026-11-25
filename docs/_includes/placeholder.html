@@ -1,0 +1,4 @@
+{% comment %}
+Dashed box for content not delivered yet. Parameters: text, height (px, default 200).
+{% endcomment %}
+<div class="placeholder" style="min-height: {{ include.height | default: 200 }}px">{{ include.text }}</div>

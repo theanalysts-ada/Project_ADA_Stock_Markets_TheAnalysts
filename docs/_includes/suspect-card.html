@@ -1,0 +1,13 @@
+{% comment %}
+Pinned card of the suspects board.
+Parameters: tag, name, motive, alibi, anchor (id of the interrogation section),
+stamp_state and stamp_text (optional, passed to stamp.html; pending by default).
+{% endcomment %}
+<article class="suspect-card">
+  <p class="paper-label">{{ include.tag }}</p>
+  <h3 class="name">{{ include.name }}</h3>
+  <p><strong>Motive:</strong> {{ include.motive }}</p>
+  <p><strong>Alibi to check:</strong> {{ include.alibi }}</p>
+  {% include stamp.html state=include.stamp_state text=include.stamp_text %}
+  {% if include.anchor %}<a href="#{{ include.anchor }}">Go to the interrogation</a>{% endif %}
+</article>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="{{ site.lang | default: 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ site.title }}</title>
+  <meta name="description" content="{{ site.description | strip_newlines | escape }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="{{ '/assets/css/story.css' | relative_url }}">
+</head>
+<body data-base="{{ site.baseurl }}">
+  <a class="skip-link" href="#bet">Skip to the story</a>
+  <div class="page">
+    <header class="site-header">
+      <p class="case-file">Case file {{ site.data.crime.first_date | slice: 0, 4 | default: '1998' }}–{{ site.data.crime.last_date | slice: 0, 4 | default: '2020' }} · Team TheAnalysts</p>
+      <nav aria-label="Story sections">
+        <a href="#scene">The crime scene</a>
+        <a href="#suspects">Suspects</a>
+        <a href="#stopped">Has it stopped?</a>
+        <a href="#verdict">Verdict</a>
+      </nav>
+    </header>
+
+    <main>
+      {{ content }}
+    </main>
+
+    <footer class="site-footer">
+      <p>TheAnalysts · EPFL ADA 2026 · <a href="#scene">Back to the crime scene</a> · <a href="{{ site.github.repository_url }}">Code and notebook on GitHub</a></p>
+    </footer>
+  </div>
+
+  <script src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js" defer></script>
+  <script src="{{ '/assets/js/style.js' | relative_url }}" defer></script>
+  <script src="{{ '/assets/js/story.js' | relative_url }}" defer></script>
+  <script src="{{ '/assets/js/crime.js' | relative_url }}" defer></script>
+</body>
+</html>

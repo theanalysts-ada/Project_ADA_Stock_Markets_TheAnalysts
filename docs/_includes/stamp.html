@@ -1,0 +1,4 @@
+{% comment %}
+Rubber stamp. Parameters: state = pending (default), verdict or open; text (default "Under interrogation").
+{% endcomment %}
+<span class="stamp stamp--{{ include.state | default: 'pending' }}">{{ include.text | default: 'Under interrogation' }}</span>

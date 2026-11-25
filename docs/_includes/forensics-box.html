@@ -1,0 +1,8 @@
+{% comment %}
+Collapsible "Forensics lab": method in a few sentences and a link to the notebook.
+Parameters: text, section (notebook part, e.g. "Part II").
+{% endcomment %}
+<details class="forensics">
+  <summary>Open the forensics lab</summary>
+  <p>{{ include.text }} Full method: <a href="{{ site.github.repository_url }}/blob/main/results.ipynb">notebook, {{ include.section }}</a>.</p>
+</details>

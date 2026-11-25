@@ -1,0 +1,16 @@
+{% comment %} 7 · Has the crime stopped? (07:30), notebook II.5. Owner: Sara. {% endcomment %}
+{% assign f = site.data.crime %}
+<section class="chapter" id="stopped" aria-labelledby="stopped-title">
+  <p class="clock">07:30 · Has the crime stopped?</p>
+  <h2 id="stopped-title">Twenty-two years of nights</h2>
+  <div class="btn-row" role="group" aria-label="Choose a portfolio">
+    <button type="button" class="btn" data-book="stocks_dv" aria-pressed="true">Stocks, weighted by traded value</button>
+    <button type="button" class="btn" data-book="stocks_ew" aria-pressed="false">Stocks, equal-weighted</button>
+    <button type="button" class="btn" data-book="spy" aria-pressed="false">SPY</button>
+  </div>
+  {% include exhibit.html id="chart-rolling" label="Exhibit H · The long run"
+     title="On three-year windows, the night is ahead of the day most of the time"
+     aria="Line chart: mean overnight and intraday returns over the previous three years, annualised, from 2001 to 2020."
+     caption="For each date, the mean overnight and intraday returns of the previous 756 trading days (about three years), in % a year. Only past days enter each window." %}
+  <p class="prose">The night stays ahead of the day in {{ f.windows.stocks_dv }}% of three-year windows for stocks weighted by traded value, and in {{ f.windows.spy }}% for SPY. The crime has lasted twenty-two years, with a few pauses. So why has nobody stopped it?</p>
+</section>
