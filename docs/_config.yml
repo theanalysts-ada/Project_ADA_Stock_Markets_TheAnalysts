@@ -1,0 +1,14 @@
+# Data story website, built by GitHub Pages from this docs/ folder.
+title: Who Makes Money While Wall Street Sleeps?
+description: >-
+  A data story on why US stocks and ETFs earn their return overnight rather than
+  during the trading day, 1998–2020. EPFL ADA 2026, team TheAnalysts.
+lang: en
+
+# baseurl is left unset on purpose: GitHub Pages fills it from the repository name,
+# so the site works whichever account or organisation hosts it.
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - CONTRIBUTING.md
