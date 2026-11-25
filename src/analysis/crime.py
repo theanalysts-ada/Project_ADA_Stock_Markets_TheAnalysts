@@ -1,7 +1,14 @@
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 
-from src.features.returns import TRADING_DAYS_PER_YEAR, cumulative_wealth
+from src.data.quality import apply_quality_filter
+from src.features.returns import (
+    TRADING_DAYS_PER_YEAR,
+    cumulative_wealth,
+    lagged_mean_dollar_volume,
+    portfolio_returns,
+)
 
 
 # Return units: x100 for %, x10000 for bp; rounding only controls displayed precision.
@@ -83,6 +90,24 @@ def strategy_headline(pair: pd.DataFrame) -> pd.DataFrame:
 MIN_OBS = 252
 
 
+def asset_portfolios(df: pd.DataFrame, asset_type: str) -> dict[str, pd.DataFrame]:
+    """Equal-weighted and dollar-volume-weighted overnight/intraday returns of one asset type.
+
+    Args:
+        df: Study sample, or a subset of it.
+        asset_type: "stock" or "etf".
+
+    Returns:
+        Two daily return tables, keyed "Stocks, ..." or "ETFs, ...".
+    """
+    rows = df[df["asset_type"].eq(asset_type)]
+    label = "Stocks" if asset_type == "stock" else "ETFs"
+    return {
+        f"{label}, equal-weighted": portfolio_returns(rows, "equal").reset_index(),
+        f"{label}, dollar-volume": portfolio_returns(rows, "dollar_volume").reset_index(),
+    }
+
+
 def study_portfolios(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Equal-weighted and dollar-volume-weighted overnight/intraday returns, stocks and ETFs.
 
@@ -92,15 +117,21 @@ def study_portfolios(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     Returns:
         Four daily return tables, keyed by a short panel title.
     """
-    from src.features.returns import portfolio_returns
+    return {**asset_portfolios(df, "stock"), **asset_portfolios(df, "etf")}
 
-    stocks, etfs = df["asset_type"] == "stock", df["asset_type"] == "etf"
-    return {
-        "Stocks, equal-weighted": portfolio_returns(df[stocks], "equal").reset_index(),
-        "Stocks, dollar-volume": portfolio_returns(df[stocks], "dollar_volume").reset_index(),
-        "ETFs, equal-weighted": portfolio_returns(df[etfs], "equal").reset_index(),
-        "ETFs, dollar-volume": portfolio_returns(df[etfs], "dollar_volume").reset_index(),
-    }
+
+def make_books(df: pd.DataFrame, portfolios: dict[str, pd.DataFrame] | None = None) -> dict[str, pd.DataFrame]:
+    """SPY and the four portfolios of study_portfolios, the books tested in Part II.
+
+    Args:
+        df: Study sample, or a variant of it with the same columns.
+        portfolios: Output of study_portfolios on df, computed if not given.
+
+    Returns:
+        Book name -> daily table with date, r_night and r_day.
+    """
+    spy = df.loc[df["ticker"].eq("SPY"), ["date", "r_night", "r_day"]].dropna()
+    return {"SPY": spy, **(portfolios or study_portfolios(df))}
 
 
 def portfolio_paths(portfolios: dict[str, pd.DataFrame], names: list[str] | None = None) -> dict[str, pd.DataFrame]:
@@ -158,44 +189,6 @@ def gap_share_above_zero(gaps: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame.from_dict(rows, orient="index").round(1).rename_axis("asset_type")
 
 
-def gap_heatmap_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Annualised night − day gap (%) by year and group (stocks, ETFs, dollar-volume quintiles).
-
-    Quintiles use the 20-day lagged mean dollar volume, ranked within each year (Q1 = least traded).
-    2020 is omitted: the file ends on 1 April, so an annualised 2020 gap would be a Q1 crash, not a year.
-
-    Args:
-        df: Table with date, asset_type, r_night, r_day, dollar_volume and ticker.
-
-    Returns:
-        Rows = years, columns = Stocks, ETFs, Q1–Q5.
-    """
-    from src.features.returns import lagged_mean_dollar_volume
-
-    columns = ["date", "asset_type", "r_night", "r_day"]
-    sample = df[columns].dropna(subset=["r_night", "r_day"]).copy()
-    sample[["r_night", "r_day"]] = sample[["r_night", "r_day"]].astype("float64")
-    sample["year"] = sample["date"].dt.year
-    sample["weight"] = lagged_mean_dollar_volume(df).loc[sample.index]
-    ranks = sample.groupby("year")["weight"].rank(pct=True)
-    # Split yearly liquidity ranks into five groups (Q1 to Q5).
-    sample["quintile"] = np.ceil(5 * ranks)
-    scale = 100 * TRADING_DAYS_PER_YEAR
-
-    means = sample.groupby(["year", "asset_type"], observed=True)[["r_night", "r_day"]].mean()
-    gaps = scale * (means["r_night"] - means["r_day"])
-    table = gaps.unstack().reindex(columns=["stock", "etf"])
-    table.columns = ["Stocks", "ETFs"]
-
-    means = sample.groupby(["year", "quintile"], observed=True)[["r_night", "r_day"]].mean()
-    gaps = scale * (means["r_night"] - means["r_day"])
-    by_q = gaps.unstack()
-    by_q.columns = [f"Q{int(c)}" for c in by_q.columns]
-    table = pd.concat([table, by_q], axis=1).rename_axis("year")
-    # Omit 2020 because prices stop on 1 April: it is not a complete year.
-    return table.loc[table.index < 2020].round(1)
-
-
 def filter_comparison(prices: pd.DataFrame, start_year: int, filters: dict[str, list[str]]) -> pd.DataFrame:
     """Annualised night and day returns of SPY and of equal-weighted stocks, under each filter.
 
@@ -207,15 +200,8 @@ def filter_comparison(prices: pd.DataFrame, start_year: int, filters: dict[str, 
     Returns:
         One row per filter: SPY and equal-weighted stock night / day / gap (annualised, %).
     """
-    from src.data.quality import apply_quality_filter
-    from src.features.returns import portfolio_returns
-
-    columns = ["ticker", "date", "asset_type", "r_night", "r_day"]
-    for flags in filters.values():
-        for flag in flags:
-            if flag not in columns:
-                columns.append(flag)
-    slim = prices[columns]
+    flags_used = sorted({flag for flags in filters.values() for flag in flags})
+    slim = prices[["ticker", "date", "asset_type", "r_night", "r_day", *flags_used]]
     scale = 100 * TRADING_DAYS_PER_YEAR
     rows = {}
     for name, flags in filters.items():
@@ -230,7 +216,6 @@ def filter_comparison(prices: pd.DataFrame, start_year: int, filters: dict[str, 
             "EW stocks day": scale * ew["r_day"].mean(),
             "EW stocks gap": scale * (ew["r_night"] - ew["r_day"]).mean(),
         }
-        del sample
     return pd.DataFrame.from_dict(rows, orient="index").round(2)
 
 
@@ -246,8 +231,6 @@ def night_indicator_regression(df: pd.DataFrame, log: bool = False) -> pd.DataFr
     Returns:
         One row: beta (daily and annualised, %), clustered SE, 95 % CI and p-value.
     """
-    import statsmodels.api as sm
-
     night = df[["date", "r_night"]].dropna().rename(columns={"r_night": "r"})
     day = df[["date", "r_day"]].dropna().rename(columns={"r_day": "r"})
     night["night"] = 1
@@ -306,6 +289,171 @@ def block_bootstrap_ci(diff: pd.Series, block: int = 21, n: int = 1000, seed: in
     }]).round(2)
 
 
+def gap_bootstrap(pairs: dict[str, pd.DataFrame], block: int = 21, winsorise: float = 0.0) -> pd.DataFrame:
+    """Block-bootstrap 95 % CI of the night − day gap for each portfolio.
+
+    Args:
+        pairs: Portfolio name -> table with date, r_night and r_day.
+        block: Length of each block of consecutive trading days.
+        winsorise: If above 0, daily gaps below this quantile or above 1 − this quantile
+            are set to the quantile before the bootstrap.
+
+    Returns:
+        One row per portfolio, from block_bootstrap_ci, with the sample dates.
+    """
+    rows = []
+    for name, pair in pairs.items():
+        diff = pair["r_night"] - pair["r_day"]
+        if winsorise > 0:
+            diff = diff.clip(diff.quantile(winsorise), diff.quantile(1 - winsorise))
+        rows.append(label_sample(block_bootstrap_ci(diff, block=block), name, pair))
+    return pd.concat(rows, ignore_index=True)
+
+
+def gap_regression(pairs: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Date-clustered night-indicator regression for each portfolio.
+
+    Args:
+        pairs: Portfolio name -> table with date, r_night and r_day.
+
+    Returns:
+        One row per portfolio, from night_indicator_regression, with the sample dates.
+    """
+    rows = [
+        label_sample(night_indicator_regression(pair), name, pair)
+        for name, pair in pairs.items()
+    ]
+    return pd.concat(rows, ignore_index=True)
+
+
+def rolling_annualised(pair: pd.DataFrame, window: int) -> pd.DataFrame:
+    """Rolling annualised mean of overnight and intraday returns.
+
+    Args:
+        pair: Table with date, r_night and r_day, one row per date.
+        window: Length of the window in trading days.
+
+    Returns:
+        One row per complete window: date, night and day, in annualised percent.
+    """
+    ordered = pair.sort_values("date")
+    scale = 100 * TRADING_DAYS_PER_YEAR
+    rolled = ordered[["r_night", "r_day"]].rolling(window, min_periods=window).mean()
+    out = pd.DataFrame({
+        "date": ordered["date"].to_numpy(),
+        "night": scale * rolled["r_night"].to_numpy(),
+        "day": scale * rolled["r_day"].to_numpy(),
+    })
+    return out.dropna()
+
+
+def night_ahead_share(rolled: dict[str, pd.DataFrame]) -> pd.Series:
+    """Share (%) of rolling windows in which the overnight mean is above the intraday mean.
+
+    Args:
+        rolled: Portfolio name -> table returned by rolling_annualised.
+
+    Returns:
+        One value per portfolio.
+    """
+    shares = {name: 100 * (frame["night"] > frame["day"]).mean() for name, frame in rolled.items()}
+    return pd.Series(shares, name="windows with night > day (%)").round(1)
+
+
+def outside_crises(pair: pd.DataFrame) -> pd.DataFrame:
+    """Drop the two crises of the sample from a daily return table.
+
+    The crises are the whole of 2008 (the financial crisis) and every session from
+    February 2020 (the COVID crash; the data end on 1 April 2020).
+
+    Args:
+        pair: Table with a date column.
+
+    Returns:
+        The same columns, without those sessions.
+    """
+    date = pair["date"]
+    crisis = date.dt.year.eq(2008) | date.ge("2020-02-01")
+    return pair.loc[~crisis]
+
+
+def gap_robustness(
+    books: dict[str, pd.DataFrame], study: pd.DataFrame, excluded_etfs: pd.Series, unlinked: pd.Series,
+) -> pd.DataFrame:
+    """Annualised night − day gap and its 95 % block-bootstrap interval under other choices.
+
+    Checks on every book: the main test (21-day blocks), 5- and 63-day blocks, daily gaps
+    winsorised at 1 %, without the crises (outside_crises), and the night without dividends
+    (r_night_price). On the stock books only: without the stocks not linked to the SEC.
+    On the ETF books only: without excluded_etfs.
+
+    Args:
+        books: Output of make_books on study.
+        study: Study sample, with r_night_price.
+        excluded_etfs: Tickers of the ETFs removed in the last check.
+        unlinked: Boolean mask of study, True for the stocks not linked to the SEC.
+
+    Returns:
+        One row per book, one column per check; each cell reads "gap [low, high]" in %.
+    """
+    columns = ["ticker", "date", "asset_type", "r_night_price", "r_day", "dollar_volume"]
+    no_dividend = study[columns].rename(columns={"r_night_price": "r_night"})
+    checks = {
+        "main (21-day blocks)": gap_bootstrap(books),
+        "5-day blocks": gap_bootstrap(books, block=5),
+        "63-day blocks": gap_bootstrap(books, block=63),
+        "winsorised at 1 %": gap_bootstrap(books, winsorise=0.01),
+        "without 2008 and 2020": gap_bootstrap({name: outside_crises(pair) for name, pair in books.items()}),
+        "night without dividends": gap_bootstrap(make_books(no_dividend)),
+        "stocks linked to the SEC only": gap_bootstrap(asset_portfolios(study[~unlinked], "stock")),
+        "without volatility and commodity ETFs": gap_bootstrap(
+            asset_portfolios(study[~study["ticker"].isin(excluded_etfs)], "etf"),
+        ),
+    }
+    cells = {}
+    for check, table in checks.items():
+        text = table.set_index("portfolio")[["mean annualised (%)", "CI 95% low", "CI 95% high"]].round(1).astype(str)
+        cells[check] = text["mean annualised (%)"] + " [" + text["CI 95% low"] + ", " + text["CI 95% high"] + "]"
+    return pd.DataFrame(cells).reindex(list(books)).fillna("–")
+
+
+def liquidity_quintiles(df: pd.DataFrame, asset_type: str) -> dict[str, pd.DataFrame]:
+    """Equal-weighted books of one asset type by lagged dollar-volume quintile.
+
+    Quintiles use the 20-day lagged mean dollar volume, ranked among the tickers of the same
+    asset type on each date (Q1 = least traded), so they use no later information. The first
+    20 sessions of a ticker have no lagged mean and are left out.
+
+    Args:
+        df: Study sample with date, ticker, asset_type, r_night, r_day and dollar_volume.
+        asset_type: "stock" or "etf".
+
+    Returns:
+        Q1–Q5, each a daily table with date, r_night and r_day.
+    """
+    rows = df.loc[df["asset_type"].eq(asset_type)].dropna(subset=["r_night", "r_day"])
+    weight = lagged_mean_dollar_volume(df).loc[rows.index]
+    quintile = np.ceil(5 * weight.groupby(rows["date"]).rank(pct=True)).rename("quintile")
+    means = rows.groupby([quintile, "date"])[["r_night", "r_day"]].mean().reset_index()
+    return {f"Q{int(q)}": part.drop(columns="quintile") for q, part in means.groupby("quintile")}
+
+
+def etf_kind_books(df: pd.DataFrame, kinds: pd.Series) -> dict[str, pd.DataFrame]:
+    """Equal-weighted ETF books by kind of fund.
+
+    Args:
+        df: Study sample.
+        kinds: Kind of each ETF, indexed by ticker (from etf_kinds).
+
+    Returns:
+        Kind -> daily table with date, r_night and r_day.
+    """
+    etfs = df[df["asset_type"].eq("etf")]
+    kind = etfs["ticker"].astype(str).map(kinds).rename("kind")
+    means = etfs.groupby([kind, "date"])[["r_night", "r_day"]].mean().reset_index()
+    return {name: part.drop(columns="kind") for name, part in means.groupby("kind")}
+
+
 def label_sample(table: pd.DataFrame, portfolio: str, df: pd.DataFrame) -> pd.DataFrame:
     """Add the portfolio name and the first and last date of the paired returns.
 
@@ -323,28 +471,3 @@ def label_sample(table: pd.DataFrame, portfolio: str, df: pd.DataFrame) -> pd.Da
     out.insert(1, "first date", pair["date"].min().date())
     out.insert(2, "last date", pair["date"].max().date())
     return out
-
-
-def gap_tests_by_period(df: pd.DataFrame) -> pd.DataFrame:
-    """Night-indicator regression on simple and log returns, full sample and around 2008.
-
-    Args:
-        df: Table with date, r_night and r_day.
-
-    Returns:
-        One row per (sample, return type), with period labels from the input dates.
-        The 2008 split is included when both sides are present.
-    """
-    df = df.dropna(subset=["r_night", "r_day"])
-    first_year, last_year = df["date"].dt.year.min(), df["date"].dt.year.max()
-    samples = {f"{first_year}–{last_year}": df}
-    # Split at the financial-crisis year to compare the two historical periods.
-    if first_year < 2008 <= last_year:
-        samples[f"{first_year}–2007"] = df[df["date"].dt.year <= 2007]
-        samples[f"2008–{last_year}"] = df[df["date"].dt.year >= 2008]
-    rows = []
-    for sample, subset in samples.items():
-        for log, kind in ((False, "simple"), (True, "log")):
-            row = night_indicator_regression(subset, log=log).iloc[0]
-            rows.append({"sample": sample, "return": kind, **row})
-    return pd.DataFrame(rows).set_index(["sample", "return"])

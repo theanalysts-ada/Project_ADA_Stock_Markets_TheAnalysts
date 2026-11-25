@@ -64,6 +64,23 @@ def add_returns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_price_night(df: pd.DataFrame) -> pd.DataFrame:
+    """Add the overnight return without dividends, from raw prices.
+
+    r_night_price(t) = open(t) / close(t-1) - 1 on raw prices, which are adjusted for splits but
+    not for dividends. On an ex-dividend day the price drop is then counted as a loss, so
+    r_night - r_night_price is the dividend. Missing where r_night is missing.
+
+    Args:
+        df: Table from add_returns (sorted by ticker and date), with raw open and close.
+
+    Returns:
+        A copy of the table with r_night_price added.
+    """
+    prev_close = df.groupby("ticker", observed=True)["close"].shift(1)
+    return df.assign(r_night_price=(df["open"] / prev_close - 1).where(df["r_night"].notna()))
+
+
 # 20 sessions approximate a trading month and smooth one-day volume spikes.
 def lagged_mean_dollar_volume(df: pd.DataFrame, window: int = 20) -> pd.Series:
     """Mean dollar volume of the previous `window` trading days of each ticker (excludes today)."""
