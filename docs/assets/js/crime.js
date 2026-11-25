@@ -42,8 +42,7 @@
       const buttons = Array.from(document.querySelectorAll('[data-asset]'));
       const sentence = document.getElementById('gaps-text');
       const draw = (asset) => {
-        const counts = d[asset];
-        const total = counts.reduce((a, b) => a + b, 0);
+        const { counts, total, outside } = d[asset];
         Plotly.react(el, [{
           type: 'bar', x: centers, y: counts.map((c) => (100 * c) / total), width,
           marker: { color: centers.map((c) => (c > 0 ? C.night : C.day)) },
@@ -51,7 +50,7 @@
         }], NH.layout({
           showlegend: false,
           bargap: 0.08,
-          xaxis: { range: [-100, 200], ticksuffix: '%', title: { text: 'Annualised night − day gap (values beyond −100% or 200% counted at the edge)' } },
+          xaxis: { range: [-100, 200], ticksuffix: '%', title: { text: 'Annualised night − day gap (' + outside + ' tickers beyond −100% or 200% not shown)' } },
           yaxis: { title: { text: 'Share of tickers (%)' } },
           shapes: [{ type: 'line', x0: 0, x1: 0, yref: 'paper', y0: 0, y1: 1, line: { color: C.ink, width: 1.5, dash: 'dash' } }],
           annotations: [{ x: 0, yref: 'paper', y: 1, xanchor: 'left', showarrow: false, text: ' night = day', font: { size: 12, color: C.muted } }],

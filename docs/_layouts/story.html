@@ -23,6 +23,14 @@
       </nav>
     </header>
 
+    <nav class="mini-board" id="mini-board" aria-label="Suspects">
+      <a class="mini-title" href="#suspects">Suspects</a>
+      {% for s in site.data.verdicts.suspects %}
+      <a class="mini-suspect mini--{{ s.state }}" href="#{{ s.id }}" data-suspect="{{ s.id }}"><span class="dot" aria-hidden="true"></span>{{ s.name }}<span class="sr-only">: {{ s.stamp }}</span></a>
+      {% endfor %}
+    </nav>
+    <div class="clock-face" aria-hidden="true"><span class="time">16:00</span><span class="city">New York</span></div>
+
     <main>
       {{ content }}
     </main>
@@ -36,5 +44,6 @@
   <script src="{{ '/assets/js/style.js' | relative_url }}" defer></script>
   <script src="{{ '/assets/js/story.js' | relative_url }}" defer></script>
   <script src="{{ '/assets/js/crime.js' | relative_url }}" defer></script>
+  <script src="{{ '/assets/js/night.js' | relative_url }}" defer></script>
 </body>
 </html>

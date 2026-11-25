@@ -1,16 +1,19 @@
 {% comment %} 3 · The suspects board (22:00). Stamps stay "pending" until the verdict fills them. {% endcomment %}
 {% assign f = site.data.crime %}
-<section class="chapter" id="suspects" aria-labelledby="suspects-title">
+{% assign v_risk = site.data.verdicts.suspects | where: "id", "risk" | first %}
+{% assign v_news = site.data.verdicts.suspects | where: "id", "news" | first %}
+{% assign v_crowd = site.data.verdicts.suspects | where: "id", "crowd" | first %}
+<section class="chapter" id="suspects" data-clock="22:00" data-sky="#0C1122" aria-labelledby="suspects-title">
   <p class="clock">22:00 · The suspects board</p>
   <h2 id="suspects-title">Three suspects. One night.</h2>
   <div class="board">
-    {% include suspect-card.html tag="Suspect n°1" name="Risk" anchor="risk"
+    {% include suspect-card.html tag="Suspect n°1" name="Risk" anchor="risk" stamp_state=v_risk.state stamp_text=v_risk.stamp
        motive="Holding a stock while the market is closed is risky, so the night must pay a premium."
        alibi="Longer closures should earn more." %}
-    {% include suspect-card.html tag="Suspect n°2" name="News" anchor="news"
+    {% include suspect-card.html tag="Suspect n°2" name="News" anchor="news" stamp_state=v_news.state stamp_text=v_news.stamp
        motive="Firms publish after the close, so prices jump at the open."
        alibi="The gap should vanish on nights without news." %}
-    {% include suspect-card.html tag="Suspect n°3" name="The crowd" anchor="crowd"
+    {% include suspect-card.html tag="Suspect n°3" name="The crowd" anchor="crowd" stamp_state=v_crowd.state stamp_text=v_crowd.stamp
        motive="Attention brings buyers at the open who sell back during the day."
        alibi="A spike of attention should be followed by a hangover." %}
     <article class="cold-case">

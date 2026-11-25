@@ -1,0 +1,26 @@
+# One place for the verdict on each suspect. Read by the suspects board, the mini board
+# in the navigation and the verdict board. Update it when a chapter reaches its verdict.
+#   state: pending (under interrogation), verdict (stamped in red) or open.
+#   stamp: the text on the stamp, a few words.
+suspects:
+  - id: risk
+    name: Risk
+    state: pending
+    stamp: Under interrogation
+  - id: news
+    name: News
+    state: pending
+    stamp: Under interrogation
+  - id: crowd
+    name: The crowd
+    state: pending
+    stamp: Under interrogation
+
+# Red threads on the verdict board: pairs of card ids. Card ids are exhibit-a, exhibit-b,
+# exhibit-c, exhibit-d, exhibit-h, report, risk, news, crowd and cold-case.
+# For now, only the leads stated in Part II: the most traded stocks carry the gap
+# (a lead for news and the crowd), and the ETF gap is still unexplained.
+threads:
+  - [report, news]
+  - [report, crowd]
+  - [exhibit-b, cold-case]

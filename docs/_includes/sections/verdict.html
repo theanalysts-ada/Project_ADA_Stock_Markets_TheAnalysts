@@ -1,8 +1,21 @@
 {% comment %} 8 · The verdict (09:30). The cost result and the ruling come with the verdict chapter. {% endcomment %}
-<section class="chapter verdict" id="verdict" aria-labelledby="verdict-title">
+<section class="chapter verdict" id="verdict" data-clock="09:30" data-sky="#C98B4E" aria-labelledby="verdict-title">
   <p class="clock">09:30 · The market opens · The verdict</p>
   <h2 id="verdict-title">The verdict</h2>
-  {% include placeholder.html text="[The suspects board returns: every stamp filled, the exhibits pinned and tied by red threads, the cold case still open.]" height=180 %}
+  <p class="prose">The suspects board returns. Each red thread ties a piece of evidence to the suspect it points to; the stamps show where each interrogation ended.</p>
+  <div class="board board--verdict" id="verdict-board" data-threads='{{ site.data.verdicts.threads | jsonify }}'>
+    <svg class="threads" aria-hidden="true"></svg>
+    <a class="pinned" data-card="exhibit-a" href="#chart-spy"><span class="paper-label">Exhibit A</span>SPY: the night earns, the day loses</a>
+    <a class="pinned" data-card="exhibit-b" href="#chart-gaps"><span class="paper-label">Exhibit B</span>The same crime, everywhere</a>
+    <a class="pinned" data-card="exhibit-c" href="#chart-covid"><span class="paper-label">Exhibit C</span>The crash happened at night</a>
+    <a class="pinned" data-card="exhibit-d" href="#chart-intervals"><span class="paper-label">Exhibit D</span>Not chance, partly dividends</a>
+    <a class="pinned" data-card="report" href="#scene"><span class="paper-label">Police report</span>The most traded stocks carry the gap</a>
+    <a class="pinned" data-card="exhibit-h" href="#chart-rolling"><span class="paper-label">Exhibit H</span>Twenty-two years of nights</a>
+    {% for s in site.data.verdicts.suspects %}
+    <a class="pinned pinned--suspect" data-card="{{ s.id }}" href="#{{ s.id }}"><span class="paper-label">Suspect</span><span class="name">{{ s.name }}</span>{% include stamp.html state=s.state text=s.stamp %}</a>
+    {% endfor %}
+    <a class="pinned pinned--cold" data-card="cold-case" href="#suspects"><span class="paper-label">Cold case</span>The ETF riddle{% include stamp.html state="open" text="Open" %}</a>
+  </div>
   <div class="paper-box">
     <p class="callback" id="verdict-callback"
        data-none="Did the night really pay? Here is what it leaves after trading costs."

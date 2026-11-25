@@ -100,12 +100,14 @@ def main(docs: Path) -> None:
     write_json(charts / "portfolios_final.json", cases)
 
     gaps = night_day_gap_by_ticker(study)
+    # As in figure G2: shares of all tickers, values outside the range counted but not drawn.
     hist = {"edges": GAP_EDGES.tolist()}
     tickers_count, share_ahead = {}, {}
     for asset, key in (("stock", "stocks"), ("etf", "etfs")):
         values_gap = gaps.loc[gaps["asset_type"] == asset, "gap"]
-        counts, _ = np.histogram(values_gap.clip(GAP_EDGES[0], GAP_EDGES[-1]), bins=GAP_EDGES)
-        hist[key] = counts.tolist()
+        counts, _ = np.histogram(values_gap, bins=GAP_EDGES)
+        outside = int(((values_gap < GAP_EDGES[0]) | (values_gap > GAP_EDGES[-1])).sum())
+        hist[key] = {"counts": counts.tolist(), "total": len(values_gap), "outside": outside}
         tickers_count[key] = len(values_gap)
         share_ahead[key] = round(100 * float((values_gap > 0).mean()))
     write_json(charts / "ticker_gaps.json", hist)

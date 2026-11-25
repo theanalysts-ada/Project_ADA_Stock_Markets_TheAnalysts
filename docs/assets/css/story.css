@@ -330,6 +330,120 @@ p { margin: 0; }
 .paper-box input[type="range"] { width: 100%; accent-color: var(--day-ink); }
 .paper-box .small { font-size: 14px; color: var(--paper-label); }
 
+/* Scroll-linked sky: the colour follows the section being read (set by night.js). */
+body.js-sky { position: relative; z-index: 0; }
+body.js-sky::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, var(--sky, #0A0F1C) 0%, var(--sky-2, #0A0F1C) 100%);
+}
+body.js-sky .page { background: none; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The investigator's clock */
+.clock-face {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(10, 15, 28, 0.75);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  pointer-events: none;
+}
+.clock-face .time { font-size: 22px; font-weight: 600; color: var(--ink); letter-spacing: 0.06em; }
+.clock-face .city { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+
+/* Mini suspects board, shown once the reader has left the opening */
+.mini-board {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(74, 58, 42, 0.92);
+  font: 400 13px var(--mono);
+  transform: translate(-50%, -150%);
+  transition: transform 0.3s ease;
+}
+.mini-board.is-visible { transform: translate(-50%, 0); }
+.mini-board a { color: var(--paper); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.mini-board a:hover, .mini-board a[aria-current] { text-decoration: underline; }
+.mini-title { text-transform: uppercase; letter-spacing: 0.12em; color: var(--day) !important; }
+.mini-board .dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--paper); }
+.mini--verdict .dot { background: var(--stamp); border-color: var(--stamp); }
+.mini--open .dot { background: var(--paper); }
+
+/* Verdict board: pinned evidence tied by red threads */
+.board--verdict { position: relative; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); row-gap: 56px; }
+.board--verdict .threads { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; overflow: visible; }
+.thread {
+  fill: none;
+  stroke: var(--pin);
+  stroke-width: 2;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 1.6s ease;
+}
+.board--verdict.is-drawn .thread { stroke-dashoffset: 0; }
+.pinned {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 16px 16px;
+  background: var(--paper);
+  color: var(--paper-ink);
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1.4;
+  text-decoration: none;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+.pinned:nth-child(odd) { transform: rotate(-1.5deg); }
+.pinned:nth-child(even) { transform: rotate(1.2deg); }
+.pinned:hover { color: var(--paper-ink); outline: 2px solid var(--day); }
+.pinned::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: var(--pin);
+}
+.pinned .name { font: 400 24px/1.1 var(--serif); }
+.pinned--cold { background: var(--paper-grey); }
+
+@media (max-width: 640px) {
+  .clock-face { right: 12px; bottom: 12px; padding: 6px 10px; }
+  .clock-face .time { font-size: 18px; }
+  .mini-board { top: 8px; font-size: 12px; gap: 4px 10px; }
+}
+
 @media (max-width: 640px) {
   .chapter { padding: 48px 0; }
   .board { padding: 24px 16px; }
@@ -339,5 +453,6 @@ p { margin: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .stamp, .cold-case { transform: none; }
+  .stamp, .cold-case, .pinned { transform: none !important; }
+  .thread, .mini-board { transition: none; }
 }
