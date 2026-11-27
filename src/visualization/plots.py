@@ -183,11 +183,36 @@ def plot_wealth_grid(series: dict[str, pd.DataFrame], title: str) -> plt.Figure:
     return fig
 
 
-def plot_gap_histogram(gaps: pd.DataFrame) -> plt.Figure:
+def plot_rolling_means(series: dict[str, pd.DataFrame], title: str) -> plt.Figure:
+    """Rolling annualised overnight and intraday means.
+
+    Args:
+        series: Panel title -> table returned by rolling_annualised.
+        title: Super-title.
+
+    Returns:
+        One panel per series, night and day on the same dates.
+    """
+    fig, axes = plt.subplots(len(series), 1, sharex=True, figsize=(9, 2.6 * len(series)), squeeze=False)
+    for ax, (name, frame) in zip(axes.flat, series.items()):
+        ax.plot(frame["date"], frame["night"], color=NIGHT, label="Overnight")
+        ax.plot(frame["date"], frame["day"], color=DAY, label="Intraday")
+        ax.axhline(0, color=BUY_HOLD, lw=1)
+        ax.set(title=name, ylabel="Annualised %")
+    axes.flat[-1].set_xlabel("Date")
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.01))
+    fig.suptitle(title, y=1.04)
+    fig.tight_layout()
+    return fig
+
+
+def plot_gap_histogram(gaps: pd.DataFrame, title: str) -> plt.Figure:
     """Figure G2: annualised night − day gap across tickers.
 
     Args:
         gaps: Table returned by night_day_gap_by_ticker.
+        title: Super-title, stating the finding.
 
     Returns:
         The figure.
@@ -207,38 +232,16 @@ def plot_gap_histogram(gaps: pd.DataFrame) -> plt.Figure:
                xlim=(lo, hi))
         ax.legend(loc="upper right", fontsize=10)
     axes[0].set_ylabel("Share of tickers (%)")
-    fig.suptitle("Does the night beat the day? Gap across tickers")
+    fig.suptitle(title)
     return fig
 
 
-def plot_gap_heatmap(table: pd.DataFrame) -> plt.Figure:
-    """Figure G5: night − day gap by year and group.
-
-    Args:
-        table: Table returned by gap_heatmap_table.
-
-    Returns:
-        The figure.
-    """
-    fig, ax = plt.subplots(figsize=(8, 7))
-    values = table.to_numpy(dtype="float64")
-    # Cap the color scale at the 95th absolute percentile so extremes do not hide the pattern.
-    limit = np.nanpercentile(np.abs(values), 95)
-    image = ax.imshow(values, aspect="auto", origin="lower", cmap="RdBu", vmin=-limit, vmax=limit)
-    ax.set(
-        xticks=range(table.shape[1]), xticklabels=table.columns,
-        yticks=range(0, table.shape[0], 2), yticklabels=table.index[::2],
-        xlabel="Group", ylabel="Year", title="Annualised night − day gap (%)",
-    )
-    fig.colorbar(image, ax=ax, label="Night − day (annualised, %)")
-    return fig
-
-
-def plot_filter_comparison(table: pd.DataFrame) -> plt.Figure:
+def plot_filter_comparison(table: pd.DataFrame, title: str) -> plt.Figure:
     """Figure G4: annualised night − day gap of SPY and equal-weighted stocks, by filter.
 
     Args:
         table: Table returned by filter_comparison.
+        title: Figure title, stating the finding.
 
     Returns:
         The figure.
@@ -251,7 +254,7 @@ def plot_filter_comparison(table: pd.DataFrame) -> plt.Figure:
     ax.bar(x + width / 2, table["EW stocks gap"], width, color=STOCK, label="Equal-weighted stocks")
     ax.axhline(0, color=BUY_HOLD, lw=1)
     ax.set(xticks=x, xticklabels=table.index, ylabel="Annualised night − day gap (%)",
-           title="Does the gap survive the quality filters?")
+           title=title)
     ax.legend()
     return fig
 

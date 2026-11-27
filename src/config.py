@@ -8,3 +8,9 @@ DROPPED_FILE = "dropped_rows.parquet"
 
 # First year with no missing opening prices in this dataset.
 STUDY_START_YEAR = 1998
+
+# Defaults of flag_suspicious.
+EXTREME_RETURN = 0.5
+SPLICE_FACTOR = 10
+MIN_PRICE = 5.0
+MIN_DOLLAR_VOLUME_RANK = 0.2

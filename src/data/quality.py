@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+from src.config import EXTREME_RETURN, MIN_DOLLAR_VOLUME_RANK, MIN_PRICE, SPLICE_FACTOR
+
 # Report data anomalies separately so filters can be compared.
 FLAGS = [
     "open_missing", "open_equals_prev_close", "open_equals_close", "flat_day", "zero_volume", "extreme_return",
@@ -17,17 +19,20 @@ FILTERS = {
 
 
 def _prev_dollar_volume_rank(df: pd.DataFrame) -> pd.Series:
-    """Percentile rank (0-1] of the previous day's dollar volume of each row, among all rows of the same year."""
+    """Percentile rank (0-1] of the previous day's dollar volume of each row, among the tickers of the same date.
+
+    Every value compared is known at the previous close, so the rank uses no later information.
+    """
     prev = df.groupby("ticker", observed=True)["dollar_volume"].shift(1)
-    return prev.groupby(df["date"].dt.year).rank(pct=True)
+    return prev.groupby(df["date"]).rank(pct=True)
 
 
 def flag_suspicious(
     df: pd.DataFrame,
-    extreme_threshold: float = 0.5,  # Heuristic: flag half-day moves above 50%.
-    splice_factor: float = 10,  # Tenfold price jumps flag possible joined histories.
-    min_price: float = 5,  # Exclude low-priced stocks from the main sample.
-    min_dollar_volume_rank: float = 0.2,  # Drop the least-traded 20% within each year.
+    extreme_threshold: float = EXTREME_RETURN,
+    splice_factor: float = SPLICE_FACTOR,
+    min_price: float = MIN_PRICE,
+    min_dollar_volume_rank: float = MIN_DOLLAR_VOLUME_RANK,
 ) -> pd.DataFrame:
     """Add one boolean column per type of suspicious observation, plus the illiquid flag, without removing rows.
 
@@ -41,14 +46,14 @@ def flag_suspicious(
         splice_factor from one row to the next (raw prices already include splits, so such a jump means
         the history of another security was attached to the ticker).
     illiquid (not in FLAGS): on the previous day, the close was below min_price or the dollar volume was in the
-        bottom min_dollar_volume_rank of its year. Previous-day values are known before the night starts.
+        bottom min_dollar_volume_rank of the tickers trading that day. Both are known before the night starts.
 
     Args:
         df: Table from add_returns and add_dollar_volume, sorted by ticker and date.
         extreme_threshold: Absolute simple return above which a return is called extreme.
         splice_factor: Price ratio between two consecutive rows above which the earlier history is flagged.
         min_price: Minimum previous close ($) of a liquid observation.
-        min_dollar_volume_rank: Minimum yearly percentile rank of the previous dollar volume of a liquid observation.
+        min_dollar_volume_rank: Minimum same-day percentile rank of the previous dollar volume of a liquid observation.
 
     Returns:
         A copy of the table with one column per flag in FLAGS and the illiquid column.
@@ -99,7 +104,7 @@ def flag_count_by_year(df: pd.DataFrame, flag: str) -> pd.Series:
 def stale_share_by_liquidity(df: pd.DataFrame, start_year: int) -> pd.DataFrame:
     """Share of stale opens (%) by quintile of the previous day's dollar volume and by previous close.
 
-    Quintiles are computed within each year over all tickers (1 = least traded), so they do not drift with
+    Quintiles are computed among the tickers of each date (1 = least traded), so they do not drift with
     the growth of the market.
 
     Args:
@@ -160,7 +165,7 @@ def filter_summary(df: pd.DataFrame, start_year: int, filters: dict[str, list[st
     in_period = (df["date"].dt.year >= start_year).sum()
     summary = {}
     for name, flags in filters.items():
-        kept = _keep_mask(df, start_year, flags).sum()
+        kept = keep_mask(df, start_year, flags).sum()
         summary[name] = {"rows kept": kept, "% of all rows": 100 * kept / len(df), "% of study period": 100 * kept / in_period}
     return pd.DataFrame.from_dict(summary, orient="index").round(1)
 
@@ -176,9 +181,9 @@ def apply_quality_filter(df: pd.DataFrame, start_year: int, drop_flags: list[str
     Returns:
         The filtered table.
     """
-    return df[_keep_mask(df, start_year, drop_flags)]
+    return df[keep_mask(df, start_year, drop_flags)]
 
 
-def _keep_mask(df: pd.DataFrame, start_year: int, drop_flags: list[str]) -> pd.Series:
+def keep_mask(df: pd.DataFrame, start_year: int, drop_flags: list[str]) -> pd.Series:
     """True for observations from start_year onwards that raise none of drop_flags."""
     return (df["date"].dt.year >= start_year) & ~df[drop_flags].any(axis=1)

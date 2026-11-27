@@ -1,5 +1,8 @@
-import pandas as pd
+import re
 from pathlib import Path
+
+import pandas as pd
+
 from src.config import DATA_DIR, META_FILE
 
 # Decode the listing codes supplied in the Nasdaq metadata file.
@@ -45,24 +48,48 @@ def exchange_breakdown(meta: pd.DataFrame) -> pd.DataFrame:
     return table.loc[order].rename_axis(index="exchange", columns=None)
 
 
-# Heuristic name screen for ETFs exposed to markets outside the US.
+# Name screen for ETFs exposed to markets outside the US: regions, countries,
+# "outside the US" wording, global funds and foreign currencies.
 FOREIGN_KEYWORDS = (
-    "japan", "europe", "eurozone", "emerging", "china", "chinese", "india", "brazil",
-    "korea", "mexico", "australia", "hong kong", "taiwan", "russia", "latin", "eafe",
-    "frontier", "international", "germany", "united kingdom", "britain", "asia",
-    "pacific", "africa",
+    "japan", "nikkei", "jpx", "europe", "euro", "nordic", "china", "chinese", "india", "brazil",
+    "korea", "mexico", "australia", "hong kong", "taiwan", "russia", "latin", "asia", "pacific",
+    "africa", "germany", "united kingdom", "britain", "canada", "canadian", "switzerland", "swiss",
+    "france", "spain", "italy", "sweden", "norway", "denmark", "finland", "belgium", "austria",
+    "netherlands", "ireland", "israel", "chile", "peru", "colombia", "argentina", "turkey",
+    "vietnam", "indonesia", "philippines", "thailand", "malaysia", "singapore", "poland", "greece",
+    "new zealand", "egypt", "nigeria", "pakistan", "saudi", "qatar", "uae", "gulf", "middle east",
+    "emerging", " em ", "bric", "frontier", "eafe", "international", "intl", "foreign", "non-us",
+    "ex-us", "ex us", "ex-u.s.", "ex u.s.", "ex-north america", "developed", "acwi", "all country",
+    "world", "global", "stoxx select", "vstoxx", "currency", "yen", "sterling", "franc", "yuan",
 )
+# Name markers of bond and income funds, used to split ETFs by kind.
+BOND_KEYWORDS = (
+    "bond", "treasury", "muni", "aggregate", "tips", "duration", "credit", "loan", "mortgage",
+    "fixed income", "high yield", "government", "floating rate", "maturity",
+)
+# Issuer names that contain "global" without saying where the fund invests.
+FOREIGN_ISSUER_NAMES = ("global x", "u.s. global", "global markets holdings", "global beta")
 # Name markers for leveraged or inverse products with mechanical returns.
 LEVERAGED_KEYWORDS = (
     "ultrashort", "ultrapro", "ultra ", "inverse", " 2x", " 3x", "2x ", "3x ",
     "bear 1x", "bear 2x", "bear 3x", "bull 2x", "bull 3x", "leveraged", "proshares short",
+)
+# Volatility futures and commodity products. Equity sectors and miners are not in this list.
+VOL_COMMODITY_KEYWORDS = (
+    "vix", "commodity", "crude", "natural gas", "gold", "silver", "copper", "wheat", "corn", "oil",
+)
+VOL_COMMODITY_EXCEPTIONS = (
+    "goldman", "golden", "miners", "explorers", "refiner", "cornerstone",
+    "oil & gas", "oil services", "oil equipment", "first trust natural gas",
 )
 
 
 def tag_special_etfs(meta: pd.DataFrame) -> pd.DataFrame:
     """Flag ETFs that track foreign markets or that are leveraged / inverse.
 
-    Matching is case-insensitive on security_name. Stocks are never flagged.
+    Matching is case-insensitive on security_name, padded with spaces so that " em " only
+    matches the word. Issuer names in FOREIGN_ISSUER_NAMES are removed before the foreign screen.
+    Stocks are never flagged.
 
     Args:
         meta: Table returned by load_metadata.
@@ -70,11 +97,48 @@ def tag_special_etfs(meta: pd.DataFrame) -> pd.DataFrame:
     Returns:
         The metadata with boolean columns foreign_etf and leveraged_etf.
     """
-    name = meta["security_name"].fillna("").str.lower()
-    is_etf = meta["is_etf"]
-    foreign = is_etf & name.apply(lambda s: any(k in s for k in FOREIGN_KEYWORDS))
-    leveraged = is_etf & name.apply(lambda s: any(k in s for k in LEVERAGED_KEYWORDS))
+    name = " " + meta["security_name"].fillna("").str.lower() + " "
+    fund_name = name.str.replace(_any_of(FOREIGN_ISSUER_NAMES), "", regex=True)
+    foreign = meta["is_etf"] & fund_name.str.contains(_any_of(FOREIGN_KEYWORDS))
+    leveraged = meta["is_etf"] & name.str.contains(_any_of(LEVERAGED_KEYWORDS))
     return meta.assign(foreign_etf=foreign, leveraged_etf=leveraged)
+
+
+def etf_kinds(meta: pd.DataFrame) -> pd.Series:
+    """Kind of each ETF: "volatility / commodity", "bond / income" or "equity / other".
+
+    Args:
+        meta: Table returned by load_metadata.
+
+    Returns:
+        Kind, indexed by ticker, for ETFs only.
+    """
+    etfs = meta[meta["is_etf"]]
+    name = " " + etfs["security_name"].fillna("").str.lower() + " "
+    kind = pd.Series("equity / other", index=etfs.index)
+    kind[name.str.contains(_any_of(BOND_KEYWORDS))] = "bond / income"
+    kind[etfs["ticker"].isin(commodity_vol_etfs(meta))] = "volatility / commodity"
+    return kind.set_axis(etfs["ticker"])
+
+
+def _any_of(keywords: tuple[str, ...]) -> str:
+    """Regular expression that matches any of the keywords as plain text."""
+    return "|".join(re.escape(k) for k in keywords)
+
+
+def commodity_vol_etfs(meta: pd.DataFrame) -> pd.Series:
+    """Tickers of volatility-futures and commodity ETFs.
+
+    Args:
+        meta: Table returned by load_metadata.
+
+    Returns:
+        Ticker series. Equity names that only share a substring, such as Goldman or miners, are kept.
+    """
+    name = meta["security_name"].fillna("").str.lower()
+    hit = meta["is_etf"] & name.str.contains("|".join(VOL_COMMODITY_KEYWORDS))
+    skip = name.str.contains("|".join(VOL_COMMODITY_EXCEPTIONS))
+    return meta.loc[hit & ~skip, "ticker"]
 
 
 def etf_exclusion_counts(meta: pd.DataFrame) -> pd.DataFrame:
